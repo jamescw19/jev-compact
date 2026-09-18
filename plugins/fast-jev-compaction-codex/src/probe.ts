@@ -44,9 +44,8 @@ function snapshotEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   return snapshot
 }
 
-/** `probe record <Event>` — tee stdin + environment to a JSON file for offline analysis. */
-async function record(event: string): Promise<number> {
-  const stdinRaw = await readStdin()
+/** Tee a raw stdin capture to `<dataDir>/probe/` and return the file path. */
+export async function writeCapture(event: string, stdinRaw: string): Promise<string> {
   const record: ProbeRecord = {
     capturedAt: new Date().toISOString(),
     pid: process.pid,
@@ -64,6 +63,13 @@ async function record(event: string): Promise<number> {
   const file = path.join(dir, `${stamp}-${sanitizeEventName(event)}-${process.pid}.json`)
   await writeFile(file, JSON.stringify(record, null, 2) + '\n', 'utf8')
   process.stderr.write(`fast-jev probe: captured ${event} -> ${file}\n`)
+  return file
+}
+
+/** `probe record <Event>` — tee stdin + environment to a JSON file for offline analysis. */
+async function record(event: string): Promise<number> {
+  const stdinRaw = await readStdin()
+  await writeCapture(event, stdinRaw)
   return 0
 }
 
