@@ -134,6 +134,12 @@ node dist/fast-jev.mjs probe inspect <file>
   last `compacted.replacement_history` + subsequent `response_item`s.
 - Plugin hooks require one-time trust approval in the TUI; untrusted hooks are
   skipped silently in non-interactive runs.
+- Hook stdout is read through a **pipe**: a Node process that calls
+  `process.exit()` right after writing can hand the host a truncated payload,
+  which Codex then reports as `invalid … JSON output`. This plugin therefore
+  sets `process.exitCode` and exits naturally (flush first, then exit).
+- `$PLUGIN_DATA` for an installed plugin resolves to
+  `~/.codex/plugins/data/<plugin>-<marketplace>`; decision archives live there.
 
 ## License
 
