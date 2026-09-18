@@ -1,3 +1,5 @@
+import { pathToFileURL } from 'node:url'
+
 import { loadConfig } from './config.js'
 import type { FastJevConfig } from './config.js'
 import { wirePayload } from './hooks/outcome.js'
@@ -79,8 +81,10 @@ export async function main(argv: readonly string[]): Promise<number> {
   return 0
 }
 
-const invokedDirectly = process.argv[1]?.includes('fast-jev')
-if (invokedDirectly) {
+// Only auto-run when this file is the process entry module (bundled dist or
+// direct TS execution) — importing the module must never exit the host.
+const entryPath = process.argv[1]
+if (entryPath !== undefined && import.meta.url === pathToFileURL(entryPath).href) {
   const code = await main(process.argv.slice(2))
   process.exit(code)
 }

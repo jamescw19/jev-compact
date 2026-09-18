@@ -119,10 +119,10 @@ var init_config = __esm({
 });
 
 // src/stdin.ts
-async function readStdin(maxBytes = DEFAULT_MAX_BYTES) {
+async function readStream(stream, maxBytes = DEFAULT_MAX_BYTES) {
   const chunks = [];
   let total = 0;
-  for await (const chunk of process.stdin) {
+  for await (const chunk of stream) {
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     total += buf.length;
     if (total > maxBytes) {
@@ -132,6 +132,9 @@ async function readStdin(maxBytes = DEFAULT_MAX_BYTES) {
     chunks.push(buf);
   }
   return Buffer.concat(chunks).toString("utf8");
+}
+function readStdin(maxBytes = DEFAULT_MAX_BYTES) {
+  return readStream(process.stdin, maxBytes);
 }
 var DEFAULT_MAX_BYTES;
 var init_stdin = __esm({
@@ -297,6 +300,7 @@ var init_probe = __esm({
 
 // src/cli.ts
 init_config();
+import { pathToFileURL } from "node:url";
 
 // src/hooks/outcome.ts
 function wirePayload(outcome) {
@@ -1355,8 +1359,8 @@ unknown command: ${command ?? "(none)"}
 `);
   return 0;
 }
-var invokedDirectly = process.argv[1]?.includes("fast-jev");
-if (invokedDirectly) {
+var entryPath = process.argv[1];
+if (entryPath !== void 0 && import.meta.url === pathToFileURL(entryPath).href) {
   const code = await main(process.argv.slice(2));
   process.exit(code);
 }
