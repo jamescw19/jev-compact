@@ -6,6 +6,7 @@ import type { HookOutcome } from './outcome.js'
 import { resolveDataDir } from '../config.js'
 import type { FastJevConfig } from '../config.js'
 import { liveItems, parseTranscriptFile } from '../rollout/index.js'
+import { appendLog } from '../log.js'
 import { JevClient } from '../jev/client.js'
 import type { JevAsker } from '../jev/types.js'
 import { scoreCalls } from '../score.js'
@@ -114,6 +115,12 @@ export async function runPreCompact(
     items: archivedItems,
   }
   const dataDir = resolveDataDir(config, env)
+  void appendLog(dataDir, {
+    event: 'pre-compact', phase: 'scored', trigger: input.trigger,
+    calls: archive.items.length, stateStage: scored.stateStage,
+    failedBatches: scored.failedBatches, liveItems: items.length,
+    dataDirBasis: 'PLUGIN_DATA' in env ? 'plugin-data' : 'codex-home',
+  })
   const archivePath = await writeArchive(dataDir, archive)
   void cleanupExpired(dataDir, config.archiveTtlHours).catch(() => undefined)
 

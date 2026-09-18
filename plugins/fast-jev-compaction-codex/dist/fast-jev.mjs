@@ -155,8 +155,8 @@ __export(probe_exports, {
   runProbe: () => runProbe,
   writeCapture: () => writeCapture
 });
-import { mkdir as mkdir2, readdir as readdir2, readFile as readFile3, stat as stat2, writeFile as writeFile2 } from "node:fs/promises";
-import path3 from "node:path";
+import { mkdir as mkdir3, readdir as readdir2, readFile as readFile3, stat as stat2, writeFile as writeFile2 } from "node:fs/promises";
+import path4 from "node:path";
 function sanitizeEventName(event) {
   return event.replace(/[^A-Za-z0-9_-]/g, "-") || "unknown";
 }
@@ -186,10 +186,10 @@ async function writeCapture(event, stdinRaw) {
     stdinRaw,
     stdinJson: parseSafeJson(stdinRaw)
   };
-  const dir = path3.join(resolveDataDir(), "probe");
-  await mkdir2(dir, { recursive: true });
+  const dir = path4.join(resolveDataDir(), "probe");
+  await mkdir3(dir, { recursive: true });
   const stamp = record2.capturedAt.replace(/[:.]/g, "-");
-  const file = path3.join(dir, `${stamp}-${sanitizeEventName(event)}-${process.pid}.json`);
+  const file = path4.join(dir, `${stamp}-${sanitizeEventName(event)}-${process.pid}.json`);
   await writeFile2(file, JSON.stringify(record2, null, 2) + "\n", { encoding: "utf8", mode: 384 });
   process.stderr.write(`fast-jev probe: captured ${event} -> ${file}
 `);
@@ -223,7 +223,7 @@ async function inspect(files) {
 `);
       continue;
     }
-    process.stdout.write(`=== ${path3.basename(file)} ===
+    process.stdout.write(`=== ${path4.basename(file)} ===
 `);
     process.stdout.write(`event: ${parsed.event}
 `);
@@ -256,7 +256,7 @@ ${JSON.stringify(parsed.stdinJson, null, 2)}
   return 0;
 }
 async function list() {
-  const dir = path3.join(resolveDataDir(), "probe");
+  const dir = path4.join(resolveDataDir(), "probe");
   let entries;
   try {
     entries = await readdir2(dir);
@@ -265,7 +265,7 @@ async function list() {
     return 0;
   }
   for (const entry of entries.filter((name) => name.endsWith(".json")).sort()) {
-    const full = path3.join(dir, entry);
+    const full = path4.join(dir, entry);
     const size = await stat2(full).then((info) => info.size).catch(() => 0);
     process.stdout.write(`${entry}  (${size} bytes)
 `);
@@ -699,10 +699,10 @@ var IGNORED_LINE_TYPES = /* @__PURE__ */ new Set([
   "turn_context",
   "world_state"
 ]);
-async function parseTranscriptFile(path4) {
+async function parseTranscriptFile(path5) {
   const state = initialState();
   const reader = createInterface({
-    input: createReadStream(path4, { encoding: "utf8" }),
+    input: createReadStream(path5, { encoding: "utf8" }),
     crlfDelay: Infinity
   });
   for await (const line of reader) consumeLine(state, line);
@@ -793,6 +793,19 @@ function finalize(state) {
     segments: state.segments,
     lastCompacted: state.lastCompacted
   };
+}
+
+// src/log.ts
+import { appendFile, mkdir as mkdir2 } from "node:fs/promises";
+import path3 from "node:path";
+async function appendLog(dataDir, entry) {
+  try {
+    const dir = path3.join(dataDir, "log");
+    await mkdir2(dir, { recursive: true });
+    const line = JSON.stringify({ ts: (/* @__PURE__ */ new Date()).toISOString(), pid: process.pid, ...entry });
+    await appendFile(path3.join(dir, "fast-jev.log"), line + "\n", { encoding: "utf8", mode: 384 });
+  } catch {
+  }
 }
 
 // src/jev/request.ts
@@ -1226,6 +1239,16 @@ async function runPreCompact(input, config, env = process.env, asker) {
     items: archivedItems
   };
   const dataDir = resolveDataDir(config, env);
+  void appendLog(dataDir, {
+    event: "pre-compact",
+    phase: "scored",
+    trigger: input.trigger,
+    calls: archive.items.length,
+    stateStage: scored.stateStage,
+    failedBatches: scored.failedBatches,
+    liveItems: items.length,
+    dataDirBasis: "PLUGIN_DATA" in env ? "plugin-data" : "codex-home"
+  });
   const archivePath = await writeArchive(dataDir, archive);
   void cleanupExpired(dataDir, config.archiveTtlHours).catch(() => void 0);
   const keeps = archive.items.filter((item) => item.action === "keep").length;
@@ -1347,10 +1370,15 @@ function parseSessionStartInput(raw) {
 }
 async function runSessionStart(raw, config, env = process.env) {
   const input = parseSessionStartInput(raw);
-  if (input === null || input.source !== "compact") {
-    return { note: "fast-jev: session start without compaction; nothing to do" };
+  if (input === null) {
+    return { note: "fast-jev: unrecognized SessionStart payload" };
   }
   const dataDir = resolveDataDir(config, env);
+  void appendLog(dataDir, { event: "session-start", phase: "invoked", source: input.source, sessionId: input.sessionId, transcriptPath: input.transcriptPath });
+  if (input.source !== "compact") {
+    void appendLog(dataDir, { event: "session-start", phase: "skipped", reason: "source not compact" });
+    return { note: "fast-jev: session start without compaction; nothing to do" };
+  }
   const hit = await findLatestArchive(
     dataDir,
     input.sessionId,
@@ -1358,12 +1386,15 @@ async function runSessionStart(raw, config, env = process.env) {
     config.archiveTtlHours
   );
   if (hit === null) {
+    void appendLog(dataDir, { event: "session-start", phase: "no-archive", sessionId: input.sessionId });
     return { note: "fast-jev: no fresh archive for this compaction" };
   }
+  void appendLog(dataDir, { event: "session-start", phase: "archive-found", path: hit.path, items: hit.archive.items.length });
   let history = [];
   if (input.transcriptPath !== void 0) {
     const { transcript } = await parseTranscriptFile(input.transcriptPath);
     if (transcript.lastCompacted === void 0) {
+      void appendLog(dataDir, { event: "session-start", phase: "stale-transcript", path: input.transcriptPath });
       return { note: "fast-jev: transcript has no compaction record yet; skipping to avoid false negatives" };
     }
     history = effectiveHistory(transcript);
@@ -1371,6 +1402,7 @@ async function runSessionStart(raw, config, env = process.env) {
     history = [];
   }
   const candidates = collectCandidates(hit.archive, history, CALL_NOTE_CHARS);
+  void appendLog(dataDir, { event: "session-start", phase: "candidates", count: candidates.length, historyItems: history.length });
   if (candidates.length === 0) {
     await claimArchive(hit.path);
     return { note: "fast-jev: archive processed; the summary kept everything that mattered" };
@@ -1386,7 +1418,8 @@ async function runSessionStart(raw, config, env = process.env) {
       additionalContext: buildAdditionalContext(fitted, candidates.length)
     }
   };
-  await claimArchive(hit.path);
+  const claimed = await claimArchive(hit.path);
+  void appendLog(dataDir, { event: "session-start", phase: "backfill", claimed, shown: fitted.length, dropped: candidates.length });
   return outcome;
 }
 

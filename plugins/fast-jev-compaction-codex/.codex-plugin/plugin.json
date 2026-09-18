@@ -1,6 +1,6 @@
 {
   "name": "fast-jev-compaction-codex",
-  "version": "0.1.0+codex.local-20260918-2155",
+  "version": "0.1.0+codex.local-20260918-2250",
   "description": "Jev-scored compaction backfill for Codex sessions: scores tool calls before compaction and restores critical tool outputs verbatim after it.",
   "author": {
     "name": "fatelei"
@@ -16,7 +16,7 @@
   "interface": {
     "displayName": "Fast Jev Compaction",
     "shortDescription": "Jev-scored context compaction backfill",
-    "longDescription": "Scores every tool call and result with the TypeSafe Jev model before Codex compacts a session, archives the verdicts, and after compaction re-injects the critical tool outputs the built-in summary dropped — verbatim — into the next model request.",
+    "longDescription": "Scores every tool call and result with the TypeSafe Jev model before Codex compacts a session, archives the verdicts, and after compaction re-injects the critical tool outputs the built-in summary dropped \u2014 verbatim \u2014 into the next model request.",
     "developerName": "fatelei",
     "category": "Productivity",
     "capabilities": [

@@ -3,6 +3,7 @@ import { buildAdditionalContext, collectCandidates, rankAndFit } from '../backfi
 import { resolveDataDir } from '../config.js'
 import type { FastJevConfig } from '../config.js'
 import { effectiveHistory, parseTranscriptFile } from '../rollout/index.js'
+import { appendLog } from '../log.js'
 import type { StampedHistory } from '../ir.js'
 import type { HookOutcome } from './outcome.js'
 
@@ -49,10 +50,15 @@ export async function runSessionStart(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<HookOutcome> {
   const input = parseSessionStartInput(raw)
-  if (input === null || input.source !== 'compact') {
-    return { note: 'fast-jev: session start without compaction; nothing to do' }
+  if (input === null) {
+    return { note: 'fast-jev: unrecognized SessionStart payload' }
   }
   const dataDir = resolveDataDir(config, env)
+  void appendLog(dataDir, { event: 'session-start', phase: 'invoked', source: input.source, sessionId: input.sessionId, transcriptPath: input.transcriptPath })
+  if (input.source !== 'compact') {
+    void appendLog(dataDir, { event: 'session-start', phase: 'skipped', reason: 'source not compact' })
+    return { note: 'fast-jev: session start without compaction; nothing to do' }
+  }
   const hit = await findLatestArchive(
     dataDir,
     input.sessionId,
@@ -60,8 +66,10 @@ export async function runSessionStart(
     config.archiveTtlHours,
   )
   if (hit === null) {
+    void appendLog(dataDir, { event: 'session-start', phase: 'no-archive', sessionId: input.sessionId })
     return { note: 'fast-jev: no fresh archive for this compaction' }
   }
+  void appendLog(dataDir, { event: 'session-start', phase: 'archive-found', path: hit.path, items: hit.archive.items.length })
 
   // If the transcript does not reflect the compaction yet (record not
   // flushed), membership checks would wrongly report "everything present".
@@ -70,6 +78,7 @@ export async function runSessionStart(
   if (input.transcriptPath !== undefined) {
     const { transcript } = await parseTranscriptFile(input.transcriptPath)
     if (transcript.lastCompacted === undefined) {
+      void appendLog(dataDir, { event: 'session-start', phase: 'stale-transcript', path: input.transcriptPath })
       return { note: 'fast-jev: transcript has no compaction record yet; skipping to avoid false negatives' }
     }
     history = effectiveHistory(transcript)
@@ -78,6 +87,7 @@ export async function runSessionStart(
   }
 
   const candidates = collectCandidates(hit.archive, history, CALL_NOTE_CHARS)
+  void appendLog(dataDir, { event: 'session-start', phase: 'candidates', count: candidates.length, historyItems: history.length })
   if (candidates.length === 0) {
     await claimArchive(hit.path)
     return { note: 'fast-jev: archive processed; the summary kept everything that mattered' }
@@ -93,6 +103,7 @@ export async function runSessionStart(
       additionalContext: buildAdditionalContext(fitted, candidates.length),
     },
   }
-  await claimArchive(hit.path)
+  const claimed = await claimArchive(hit.path)
+  void appendLog(dataDir, { event: 'session-start', phase: 'backfill', claimed, shown: fitted.length, dropped: candidates.length })
   return outcome
 }
