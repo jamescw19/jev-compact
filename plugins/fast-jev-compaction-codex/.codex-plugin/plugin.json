@@ -1,6 +1,6 @@
 {
   "name": "fast-jev-compaction-codex",
-  "version": "0.1.0",
+  "version": "0.1.0+codex.local-20260918-2155",
   "description": "Jev-scored compaction backfill for Codex sessions: scores tool calls before compaction and restores critical tool outputs verbatim after it.",
   "author": {
     "name": "fatelei"
