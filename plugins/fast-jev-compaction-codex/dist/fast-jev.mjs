@@ -1503,7 +1503,7 @@ unknown command: ${command ?? "(none)"}
 var entryPath = process.argv[1];
 if (entryPath !== void 0 && import.meta.url === pathToFileURL(entryPath).href) {
   const code = await main(process.argv.slice(2));
-  process.exit(code);
+  process.exitCode = code;
 }
 export {
   main

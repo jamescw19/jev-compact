@@ -98,5 +98,8 @@ export async function main(argv: readonly string[]): Promise<number> {
 const entryPath = process.argv[1]
 if (entryPath !== undefined && import.meta.url === pathToFileURL(entryPath).href) {
   const code = await main(process.argv.slice(2))
-  process.exit(code)
+  // Set the exit code and let the process end naturally: process.exit() can
+  // truncate buffered stdout on pipes (the host reads hooks through a pipe),
+  // which would hand Codex half a JSON payload.
+  process.exitCode = code
 }
