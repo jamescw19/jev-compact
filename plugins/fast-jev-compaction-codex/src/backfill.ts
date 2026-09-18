@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 
 import { itemText } from './ir.js'
 import type { StampedHistory } from './ir.js'
+import { headTail } from './text.js'
 import type { ArchivedCallItem, DecisionArchive } from './archive.js'
 
 export type Membership = 'present_by_call_id' | 'present_by_fingerprint' | 'missing'
@@ -20,20 +21,28 @@ export function fingerprint(text: string): string {
   return createHash('sha256').update(text).digest('hex')
 }
 
-function callIdInHistory(item: ArchivedCallItem, history: readonly StampedHistory[]): boolean {
-  return history.some(({ item: candidate }) => {
-    if (candidate.kind !== 'function_call' && candidate.kind !== 'custom_tool_call') return false
-    return candidate.callId === item.callId
-  })
+/** Texts plus their hashes, computed once per compaction instead of once per item. */
+export interface HistoryIndex {
+  readonly callIds: ReadonlySet<string>
+  readonly texts: readonly string[]
+  readonly hashes: ReadonlySet<string>
 }
 
-function textInHistory(needle: string, texts: readonly string[]): boolean {
+export function indexHistory(history: readonly StampedHistory[]): HistoryIndex {
+  const callIds = new Set<string>()
+  for (const { item } of history) {
+    if (item.kind === 'function_call' || item.kind === 'custom_tool_call') callIds.add(item.callId)
+  }
+  const texts = history.map(({ item }) => itemText(item))
+  return { callIds, texts, hashes: new Set(texts.map(fingerprint)) }
+}
+
+function textInHistory(needle: string, index: HistoryIndex): boolean {
   if (needle === '') return true
-  const head = needle.slice(0, FINGERPRINT_HEAD)
-  const hashes = new Set(texts.map(fingerprint))
-  if (hashes.has(fingerprint(needle))) return true
+  if (index.hashes.has(fingerprint(needle))) return true
   if (needle.length >= FINGERPRINT_HEAD) {
-    return texts.some((text) => text.includes(head))
+    const head = needle.slice(0, FINGERPRINT_HEAD)
+    return index.texts.some((text) => text.includes(head))
   }
   return false
 }
@@ -46,17 +55,12 @@ function textInHistory(needle: string, texts: readonly string[]): boolean {
  * is not.
  */
 export function membership(item: ArchivedCallItem, history: readonly StampedHistory[]): Membership {
-  if (callIdInHistory(item, history)) return 'present_by_call_id'
-  const texts = history.map(({ item: candidate }) => itemText(candidate))
-  return textInHistory(item.outputText, texts) ? 'present_by_fingerprint' : 'missing'
+  return membershipIn(item, indexHistory(history))
 }
 
-function headTail(text: string, maxChars: number): string {
-  if (text.length <= maxChars) return text
-  if (maxChars === 0) return ''
-  const head = Math.floor(maxChars * 0.7)
-  const tail = maxChars - head
-  return `${text.slice(0, head)}…[${text.length - maxChars} chars omitted]${text.slice(text.length - tail)}`
+export function membershipIn(item: ArchivedCallItem, index: HistoryIndex): Membership {
+  if (index.callIds.has(item.callId)) return 'present_by_call_id'
+  return textInHistory(item.outputText, index) ? 'present_by_fingerprint' : 'missing'
 }
 
 /**
@@ -69,10 +73,11 @@ export function collectCandidates(
   history: readonly StampedHistory[],
   noteChars: number,
 ): BackfillCandidate[] {
+  const index = indexHistory(history)
   const candidates: BackfillCandidate[] = []
   for (const item of archive.items) {
     if (item.action === 'drop_call') continue
-    if (membership(item, history) !== 'missing') continue
+    if (membershipIn(item, index) !== 'missing') continue
     if (item.action === 'keep') {
       candidates.push({
         item,
@@ -124,18 +129,23 @@ export function buildAdditionalContext(
   candidates: readonly BackfillCandidate[],
   droppedCount: number,
 ): string {
-  const lines: string[] = [
+  const shown = candidates.length
+  const intro =
     `<fast-jev-compaction: the built-in summary lost ${droppedCount} tool result(s) that were scored ` +
-      'as still required. Verbatim content follows; treat it as part of the earlier conversation.>',
-  ]
+    `as still required; showing ${shown}. Verbatim content follows; treat it as part of the earlier conversation.>`
+  const lines: string[] = [intro]
   candidates.forEach((candidate, index) => {
     const { item } = candidate
     const label = `[${index + 1}] tool ${item.name} (call ${item.callId}, score ${candidate.score.toFixed(2)})`
     if (candidate.reason === 'call_note') {
-      lines.push(`${label}`, `    input: ${candidate.content}`, '    output was dropped intentionally; re-run the tool if needed')
+      lines.push(
+        label,
+        `    input: ${candidate.content}`,
+        '    output was dropped intentionally; re-run the tool if needed',
+      )
       return
     }
-    lines.push(`${label}`, `    output:`, ...candidate.content.split('\n').map((line) => `    ${line}`))
+    lines.push(label, '    output:', ...candidate.content.split('\n').map((line) => `    ${line}`))
   })
   lines.push('</fast-jev-compaction>')
   return lines.join('\n')

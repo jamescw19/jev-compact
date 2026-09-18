@@ -77,8 +77,8 @@ export function pairToolCalls(items: readonly StampedHistory[]): readonly ToolCa
 }
 
 const NONZERO_EXIT_PATTERNS: readonly RegExp[] = [
-  /"exit_code"\s*:\s*(?!0\b)[1-9]\d*/i,
-  /\bexit code\s*[:=]\s*(?!0\b)[1-9]\d*/i,
+  /"exit_code"\s*:\s*-?[1-9]\d*/i,
+  /\bexit code\s*[:=]\s*-?[1-9]\d*/i,
 ]
 
 /**

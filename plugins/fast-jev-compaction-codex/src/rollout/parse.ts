@@ -29,12 +29,6 @@ interface BuilderState {
   compactions: number
 }
 
-const IGNORED_LINE_TYPES = new Set([
-  'event_msg',
-  'token_usage_record',
-  'turn_context',
-  'world_state',
-])
 
 function initialState(): BuilderState {
   return {
@@ -50,6 +44,13 @@ function initialState(): BuilderState {
     compactions: 0,
   }
 }
+
+const IGNORED_LINE_TYPES = new Set([
+  'event_msg',
+  'token_usage_record',
+  'turn_context',
+  'world_state',
+])
 
 /**
  * Parse a rollout JSONL string into a `Transcript`. Never throws on malformed
@@ -130,7 +131,9 @@ function consumeCompacted(state: BuilderState, ordinal: number, payload: unknown
 
 function appendItem(state: BuilderState, ordinal: number, item: ReturnType<typeof narrowItem>): void {
   if (state.current.length === 0) state.currentStart = ordinal
-  state.current = [...state.current, { ordinal, item }]
+  // Local builder buffer — frozen (copied once) when the segment closes, so
+  // parsing stays linear even for rollouts with hundreds of thousands of items.
+  state.current.push({ ordinal, item })
   state.parsedItems += 1
 }
 
@@ -139,7 +142,7 @@ function closeSegment(state: BuilderState): void {
   state.segments = [
     ...state.segments,
     {
-      items: state.current,
+      items: [...state.current],
       firstOrdinal: state.currentStart,
       survivorPrefix: !state.currentIsLive,
     },

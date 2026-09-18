@@ -74,7 +74,9 @@ export async function runPreCompact(
     return { continue: true, note: 'fast-jev: nothing new to score' }
   }
 
-  const bytesAtScore = (await stat(input.transcriptPath)).size
+  const bytesAtScore = await stat(input.transcriptPath)
+    .then((info) => info.size)
+    .catch(() => 0)
   const scored = await scoreCalls(items, transport, {
     keepThreshold: config.keepThreshold,
     preserveRecentItems: config.preserveRecentItems,
@@ -119,10 +121,12 @@ export async function runPreCompact(
   const resultDrops = archive.items.filter((item) => item.action === 'drop_result').length
   const callDrops = archive.items.filter((item) => item.action === 'drop_call').length
   void archivePath
+  const failedNote = scored.failedBatches > 0 ? `; ${scored.failedBatches} batch(es) unanswered` : ''
   return {
     continue: true,
     systemMessage:
       `fast-jev: scored ${archive.items.length} tool calls ` +
-      `(${keeps} keep / ${resultDrops} result-drop / ${callDrops} call-drop) over ${stats.parsedItems} live items`,
+      `(${keeps} keep / ${resultDrops} result-drop / ${callDrops} call-drop) over ${items.length} live items` +
+      failedNote,
   }
 }

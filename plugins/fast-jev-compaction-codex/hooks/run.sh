@@ -13,11 +13,13 @@ if [ ! -f "$ENTRY" ]; then
 fi
 
 if command -v node >/dev/null 2>&1; then
-  exec node "$ENTRY" "$@"
+  node "$ENTRY" "$@" || true
+  exit 0
 fi
 
 if command -v bun >/dev/null 2>&1; then
-  exec bun "$ENTRY" "$@"
+  bun "$ENTRY" "$@" || true
+  exit 0
 fi
 
 echo "fast-jev-compaction-codex: no node or bun runtime found" >&2

@@ -152,7 +152,9 @@ describe('runSessionStart', () => {
     expect(outcome.hookSpecificOutput?.hookEventName).toBe('SessionStart')
     expect(outcome.hookSpecificOutput?.additionalContext).toContain('127 test results passed')
     expect(outcome.hookSpecificOutput?.additionalContext).toContain('re-run the tool if needed')
-    expect(outcome.suppressOutput).toBe(true)
+        // SessionStart wire schema only allows hookSpecificOutput — extra fields
+    // risk strict-validation rejection of the whole payload.
+    expect(outcome.suppressOutput).toBeUndefined()
 
     // Second invocation finds the archive consumed — no duplicate injection.
     const second = await runSessionStart(stdin, configWith({ preserveRecentItems: 0 }))

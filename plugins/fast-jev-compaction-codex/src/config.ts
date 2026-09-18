@@ -122,6 +122,12 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
   if (envKey !== undefined && envKey.trim() !== '') {
     config = { ...config, apiKey: envKey.trim() }
   }
+  // The state rides inside every request; a state budget at or above the
+  // request budget degenerates batching to one call per request.
+  const stateCeiling = config.maxRequestTokens - 1024
+  if (config.maxStateTokens > stateCeiling) {
+    config = { ...config, maxStateTokens: Math.max(1000, stateCeiling) }
+  }
   return config
 }
 

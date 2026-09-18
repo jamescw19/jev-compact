@@ -19,7 +19,11 @@ export async function readStream(
   return Buffer.concat(chunks).toString('utf8')
 }
 
-/** Read all of stdin as a UTF-8 string, capped to avoid runaway memory. */
+/**
+ * Read all of stdin as a UTF-8 string, capped to avoid runaway memory.
+ * A TTY (manual debugging) would block forever on EOF, so it yields ''.
+ */
 export function readStdin(maxBytes: number = DEFAULT_MAX_BYTES): Promise<string> {
+  if (process.stdin.isTTY) return Promise.resolve('')
   return readStream(process.stdin, maxBytes)
 }

@@ -83,6 +83,10 @@ async function loadConfig(env = process.env) {
   if (envKey !== void 0 && envKey.trim() !== "") {
     config = { ...config, apiKey: envKey.trim() };
   }
+  const stateCeiling = config.maxRequestTokens - 1024;
+  if (config.maxStateTokens > stateCeiling) {
+    config = { ...config, maxStateTokens: Math.max(1e3, stateCeiling) };
+  }
   return config;
 }
 function resolveDataDir(config, env = process.env) {
@@ -134,6 +138,7 @@ async function readStream(stream, maxBytes = DEFAULT_MAX_BYTES) {
   return Buffer.concat(chunks).toString("utf8");
 }
 function readStdin(maxBytes = DEFAULT_MAX_BYTES) {
+  if (process.stdin.isTTY) return Promise.resolve("");
   return readStream(process.stdin, maxBytes);
 }
 var DEFAULT_MAX_BYTES;
@@ -150,7 +155,7 @@ __export(probe_exports, {
   runProbe: () => runProbe,
   writeCapture: () => writeCapture
 });
-import { mkdir as mkdir2, readdir as readdir2, readFile as readFile3, stat as stat3, writeFile as writeFile2 } from "node:fs/promises";
+import { mkdir as mkdir2, readdir as readdir2, readFile as readFile3, stat as stat2, writeFile as writeFile2 } from "node:fs/promises";
 import path3 from "node:path";
 function sanitizeEventName(event) {
   return event.replace(/[^A-Za-z0-9_-]/g, "-") || "unknown";
@@ -163,6 +168,7 @@ function snapshotEnv(env) {
   }
   for (const key of Object.keys(env)) {
     if (/^(PLUGIN|CODEX|CLAUDE|FAST_JEV)/i.test(key) && !(key in snapshot)) {
+      if (/KEY|TOKEN|SECRET|PASSWORD/i.test(key)) continue;
       snapshot[key] = env[key] ?? "";
     }
   }
@@ -184,7 +190,7 @@ async function writeCapture(event, stdinRaw) {
   await mkdir2(dir, { recursive: true });
   const stamp = record2.capturedAt.replace(/[:.]/g, "-");
   const file = path3.join(dir, `${stamp}-${sanitizeEventName(event)}-${process.pid}.json`);
-  await writeFile2(file, JSON.stringify(record2, null, 2) + "\n", "utf8");
+  await writeFile2(file, JSON.stringify(record2, null, 2) + "\n", { encoding: "utf8", mode: 384 });
   process.stderr.write(`fast-jev probe: captured ${event} -> ${file}
 `);
   return file;
@@ -236,7 +242,7 @@ ${JSON.stringify(parsed.stdinJson, null, 2)}
     const transcriptPath = stdin?.transcript_path;
     if (typeof transcriptPath === "string" && transcriptPath !== "") {
       try {
-        const info = await stat3(transcriptPath);
+        const info = await stat2(transcriptPath);
         process.stdout.write(
           `transcript: exists (${info.size} bytes) at capture time? (checked now)
 `
@@ -260,8 +266,8 @@ async function list() {
   }
   for (const entry of entries.filter((name) => name.endsWith(".json")).sort()) {
     const full = path3.join(dir, entry);
-    const info = await stat3(full);
-    process.stdout.write(`${entry}  (${info.size} bytes)
+    const size = await stat2(full).then((info) => info.size).catch(() => 0);
+    process.stdout.write(`${entry}  (${size} bytes)
 `);
   }
   return 0;
@@ -309,23 +315,87 @@ function wirePayload(outcome) {
 }
 
 // src/hooks/pre-compact.ts
-import { stat as stat2 } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 
 // src/archive.ts
-import { mkdir, readdir, readFile as readFile2, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile as readFile2, rename, rm, writeFile } from "node:fs/promises";
 import path2 from "node:path";
 var ARCHIVE_VERSION = 1;
+var FILE_MODE = 384;
 function archiveDirFor(dataDir, transcriptPath) {
   return path2.join(dataDir, "decisions", path2.basename(transcriptPath));
 }
+function isFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+function isAction(value) {
+  return value === "keep" || value === "drop_result" || value === "drop_call";
+}
+function parseItem(raw) {
+  if (typeof raw !== "object" || raw === null) return null;
+  const record2 = raw;
+  if (typeof record2["callId"] !== "string" || record2["callId"] === "") return null;
+  if (record2["kind"] !== "function_call" && record2["kind"] !== "custom_tool_call") return null;
+  if (typeof record2["name"] !== "string") return null;
+  if (typeof record2["argumentsJson"] !== "string") return null;
+  if (typeof record2["outputText"] !== "string") return null;
+  if (!isFiniteNumber(record2["outputChars"])) return null;
+  if (!isFiniteNumber(record2["callOrdinal"]) || !isFiniteNumber(record2["resultOrdinal"])) return null;
+  if (!isFiniteNumber(record2["keepCall"]) || !isFiniteNumber(record2["keepResult"])) return null;
+  if (!isAction(record2["action"])) return null;
+  if (typeof record2["pinned"] !== "boolean") return null;
+  return {
+    callId: record2["callId"],
+    kind: record2["kind"],
+    name: record2["name"],
+    argumentsJson: record2["argumentsJson"],
+    outputText: record2["outputText"],
+    outputChars: record2["outputChars"],
+    isError: record2["isError"] === true,
+    callOrdinal: record2["callOrdinal"],
+    resultOrdinal: record2["resultOrdinal"],
+    keepCall: record2["keepCall"],
+    keepResult: record2["keepResult"],
+    action: record2["action"],
+    pinned: record2["pinned"]
+  };
+}
 function parseArchive(text) {
+  let parsed;
   try {
-    const parsed = JSON.parse(text);
-    if (parsed.version !== ARCHIVE_VERSION || !Array.isArray(parsed.items)) return null;
-    return parsed;
+    parsed = JSON.parse(text);
   } catch {
     return null;
   }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const record2 = parsed;
+  if (record2["version"] !== ARCHIVE_VERSION) return null;
+  if (typeof record2["sessionId"] !== "string") return null;
+  if (typeof record2["transcriptPath"] !== "string") return null;
+  if (typeof record2["scoredAt"] !== "string" || Number.isNaN(Date.parse(record2["scoredAt"]))) return null;
+  if (!Array.isArray(record2["items"])) return null;
+  const items = [];
+  for (const raw of record2["items"]) {
+    const item = parseItem(raw);
+    if (item === null) return null;
+    items.push(item);
+  }
+  return {
+    version: ARCHIVE_VERSION,
+    sessionId: record2["sessionId"],
+    turnId: typeof record2["turnId"] === "string" ? record2["turnId"] : void 0,
+    trigger: record2["trigger"] === "auto" ? "auto" : "manual",
+    transcriptPath: record2["transcriptPath"],
+    transcriptBytesAtScore: isFiniteNumber(record2["transcriptBytesAtScore"]) ? record2["transcriptBytesAtScore"] : 0,
+    scoredAt: record2["scoredAt"],
+    model: typeof record2["model"] === "string" ? record2["model"] : "",
+    stateStage: typeof record2["stateStage"] === "string" ? record2["stateStage"] : "",
+    config: {
+      keepThreshold: isFiniteNumber(record2["keepThreshold"]) ? record2["keepThreshold"] : 0.5,
+      preserveRecentItems: isFiniteNumber(record2["preserveRecentItems"]) ? record2["preserveRecentItems"] : 8
+    },
+    items
+  };
 }
 async function writeArchive(dataDir, archive) {
   const dir = archiveDirFor(dataDir, archive.transcriptPath);
@@ -333,7 +403,7 @@ async function writeArchive(dataDir, archive) {
   const stamp = archive.scoredAt.replace(/[:.]/g, "-");
   const finalPath = path2.join(dir, `${stamp}-${process.pid}.json`);
   const tmpPath = `${finalPath}.tmp-${process.pid}`;
-  await writeFile(tmpPath, JSON.stringify(archive, null, 2) + "\n", "utf8");
+  await writeFile(tmpPath, JSON.stringify(archive, null, 2) + "\n", { encoding: "utf8", mode: FILE_MODE });
   await rename(tmpPath, finalPath);
   return finalPath;
 }
@@ -342,9 +412,8 @@ function isFresh(archive, ttlHours, now) {
   if (Number.isNaN(scoredAt)) return false;
   return now - scoredAt <= ttlHours * 36e5;
 }
-async function findLatestArchive(dataDir, sessionId, transcriptPath, ttlHours, now = Date.now()) {
+async function listArchiveFiles(dataDir, transcriptPath) {
   const candidates = [];
-  const preferredDir = archiveDirFor(dataDir, transcriptPath);
   const collect = async (dir) => {
     let entries;
     try {
@@ -357,57 +426,70 @@ async function findLatestArchive(dataDir, sessionId, transcriptPath, ttlHours, n
       if (entry.isFile() && entry.name.endsWith(".json")) candidates.push(full);
     }
   };
-  await collect(preferredDir);
+  await collect(archiveDirFor(dataDir, transcriptPath));
   const root = path2.join(dataDir, "decisions");
   const dirEntries = await readdir(root, { withFileTypes: true }).catch(() => []);
   for (const entry of dirEntries) {
     if (entry.isDirectory()) await collect(path2.join(root, entry.name));
   }
+  return [...new Set(candidates)];
+}
+async function findLatestArchive(dataDir, sessionId, transcriptPath, ttlHours, now = Date.now()) {
   let best = null;
-  const seen = /* @__PURE__ */ new Set();
-  for (const candidate of candidates) {
-    if (seen.has(candidate)) continue;
-    seen.add(candidate);
-    const consumed = await stat(`${candidate}.consumed`).then(
-      () => true,
-      () => false
-    );
-    if (consumed) continue;
+  for (const candidate of await listArchiveFiles(dataDir, transcriptPath)) {
     const archive = parseArchive(await readFile2(candidate, "utf8").catch(() => ""));
     if (archive === null || !isFresh(archive, ttlHours, now)) continue;
     const sameTranscript = archive.transcriptPath === transcriptPath;
-    const sameSession = archive.sessionId === sessionId;
+    const sameSession = archive.sessionId === sessionId && sessionId !== "unknown" && archive.sessionId !== "unknown";
     if (!sameTranscript && !sameSession) continue;
-    const scoredAt = Date.parse(archive.scoredAt);
-    if (best !== null && scoredAt <= Date.parse(best.archive.scoredAt)) continue;
+    if (await isConsumed(candidate)) continue;
+    if (best !== null) {
+      const bestTier = best.archive.transcriptPath === transcriptPath ? 1 : 0;
+      const candidateTier = sameTranscript ? 1 : 0;
+      if (candidateTier < bestTier) continue;
+      if (candidateTier === bestTier && Date.parse(archive.scoredAt) <= Date.parse(best.archive.scoredAt))
+        continue;
+    }
     best = { archive, path: candidate };
   }
   return best;
 }
-async function markConsumed(archivePath) {
-  await writeFile(`${archivePath}.consumed`, (/* @__PURE__ */ new Date()).toISOString() + "\n", "utf8");
+async function isConsumed(archivePath) {
+  return readFile2(`${archivePath}.consumed`).then(
+    () => true,
+    () => false
+  );
+}
+async function claimArchive(archivePath) {
+  try {
+    await writeFile(`${archivePath}.consumed`, `${(/* @__PURE__ */ new Date()).toISOString()}
+`, {
+      encoding: "utf8",
+      mode: FILE_MODE,
+      flag: "wx"
+    });
+    return true;
+  } catch (error) {
+    return error.code !== "EEXIST";
+  }
 }
 async function cleanupExpired(dataDir, ttlHours, now = Date.now()) {
   const root = path2.join(dataDir, "decisions");
-  let dirs;
-  try {
-    dirs = await readdir(root, { withFileTypes: true });
-  } catch {
-    return;
-  }
+  const dirs = await readdir(root, { withFileTypes: true }).catch(() => []);
   for (const entry of dirs) {
     if (!entry.isDirectory()) continue;
     const dir = path2.join(root, entry.name);
-    let files;
-    try {
-      files = await readdir(dir);
-    } catch {
-      continue;
-    }
+    const files = await readdir(dir).catch(() => []);
     for (const file of files) {
       const full = path2.join(dir, file);
       if (file.includes(".tmp-")) {
         await rm(full, { force: true }).catch(() => void 0);
+        continue;
+      }
+      if (file.endsWith(".consumed")) {
+        if (!files.includes(file.replace(/\.consumed$/, ".json"))) {
+          await rm(full, { force: true }).catch(() => void 0);
+        }
         continue;
       }
       if (!file.endsWith(".json")) continue;
@@ -433,6 +515,14 @@ function liveItems(transcript) {
   if (last === void 0) return [];
   const compactedAt = transcript.lastCompacted?.ordinal ?? Number.NEGATIVE_INFINITY;
   return last.items.filter((stamped) => stamped.ordinal > compactedAt);
+}
+function recentOrdinals(items, count) {
+  const pinned = /* @__PURE__ */ new Set();
+  for (let index = Math.max(0, items.length - count); index < items.length; index += 1) {
+    const ordinal = items[index]?.ordinal;
+    if (ordinal !== void 0) pinned.add(ordinal);
+  }
+  return pinned;
 }
 function itemText(item) {
   switch (item.kind) {
@@ -495,8 +585,8 @@ function pairToolCalls(items) {
   return observations;
 }
 var NONZERO_EXIT_PATTERNS = [
-  /"exit_code"\s*:\s*(?!0\b)[1-9]\d*/i,
-  /\bexit code\s*[:=]\s*(?!0\b)[1-9]\d*/i
+  /"exit_code"\s*:\s*-?[1-9]\d*/i,
+  /\bexit code\s*[:=]\s*-?[1-9]\d*/i
 ];
 function detectError(outputText) {
   return NONZERO_EXIT_PATTERNS.some((pattern) => pattern.test(outputText));
@@ -589,12 +679,6 @@ function other(payload) {
 // src/rollout/parse.ts
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
-var IGNORED_LINE_TYPES = /* @__PURE__ */ new Set([
-  "event_msg",
-  "token_usage_record",
-  "turn_context",
-  "world_state"
-]);
 function initialState() {
   return {
     meta: {},
@@ -609,6 +693,12 @@ function initialState() {
     compactions: 0
   };
 }
+var IGNORED_LINE_TYPES = /* @__PURE__ */ new Set([
+  "event_msg",
+  "token_usage_record",
+  "turn_context",
+  "world_state"
+]);
 async function parseTranscriptFile(path4) {
   const state = initialState();
   const reader = createInterface({
@@ -665,7 +755,7 @@ function consumeCompacted(state, ordinal, payload) {
 }
 function appendItem(state, ordinal, item) {
   if (state.current.length === 0) state.currentStart = ordinal;
-  state.current = [...state.current, { ordinal, item }];
+  state.current.push({ ordinal, item });
   state.parsedItems += 1;
 }
 function closeSegment(state) {
@@ -673,7 +763,7 @@ function closeSegment(state) {
   state.segments = [
     ...state.segments,
     {
-      items: state.current,
+      items: [...state.current],
       firstOrdinal: state.currentStart,
       survivorPrefix: !state.currentIsLive
     }
@@ -829,6 +919,19 @@ function batchCalls(calls, stateTokenCount, maxRequestTokens) {
   return batches;
 }
 
+// src/text.ts
+var ELLIPSIS = "\u2026";
+function cap(text, maxChars) {
+  return text.length <= maxChars ? text : text.slice(0, maxChars) + ELLIPSIS;
+}
+function headTail(text, maxChars) {
+  if (text.length <= maxChars) return text;
+  if (maxChars <= 0) return "";
+  const head = Math.floor(maxChars * 0.7);
+  const tail = maxChars - head;
+  return `${text.slice(0, head)}${ELLIPSIS}[${text.length - maxChars} chars omitted]${text.slice(text.length - tail)}`;
+}
+
 // src/jev/state.ts
 var STATE_CONTEXT = "A coding session is being compacted to free context. `history` lists the conversation oldest first; tool outputs are replaced by short notes and long texts may be shortened. Each question asks whether one tool call \u2014 or that call\u2019s full output \u2014 still needs to remain available verbatim. Whatever is dropped is gone permanently, though the assistant can re-run tools or re-read files.";
 var STAGE_INPUT_LIMITS = [
@@ -838,7 +941,6 @@ var STAGE_INPUT_LIMITS = [
 ];
 var ABRIDGED_TEXT_CHARS = 400;
 var COLLAPSED_TEXT_CHARS = 80;
-var ELLIPSIS = "\u2026";
 function estimateTokens(text) {
   let wide = 0;
   let letters = 0;
@@ -913,28 +1015,11 @@ function buildState(items, goal) {
     history
   };
 }
-function pinnedOrdinals(items, preserveRecentItems) {
-  const pinned = /* @__PURE__ */ new Set();
-  for (let index = Math.max(0, items.length - preserveRecentItems); index < items.length; index += 1) {
-    const ordinal = items[index]?.ordinal;
-    if (ordinal !== void 0) pinned.add(ordinal);
-  }
-  return pinned;
-}
-function cap(text, maxChars) {
-  return text.length <= maxChars ? text : text.slice(0, maxChars) + ELLIPSIS;
-}
-function headTail(text, maxChars) {
-  if (text.length <= maxChars) return text;
-  const head = Math.floor(maxChars * 0.7);
-  const tail = maxChars - head;
-  return `${text.slice(0, head)}${ELLIPSIS}[${text.length - maxChars} chars omitted]${text.slice(text.length - tail)}`;
-}
 function transform(state, pinned, mutate) {
   return { ...state, history: state.history.map((entry) => pinned.has(entry.i) ? entry : mutate(entry)) };
 }
 function fitState(items, options) {
-  const pinned = pinnedOrdinals(items, options.preserveRecentItems);
+  const pinned = recentOrdinals(items, options.preserveRecentItems);
   let stage = "full";
   let state = buildState(items);
   const overBudget = () => stateTokens(state) > options.maxStateTokens;
@@ -999,15 +1084,14 @@ async function scoreCalls(items, asker, partial) {
   const options = { ...DEFAULT_SCORE_OPTIONS, ...partial };
   const calls = pairToolCalls(items);
   if (calls.length === 0) {
-    return { decisions: [], stateStage: "full", requests: 0, asked: false };
+    return { decisions: [], stateStage: "full", requests: 0, failedBatches: 0, asked: false };
   }
-  const lastOrdinal = items[items.length - 1]?.ordinal ?? 0;
-  const pinnedCutoff = lastOrdinal - options.preserveRecentItems + 1;
-  const isPinned = (call) => call.resultOrdinal >= pinnedCutoff;
+  const pinned = recentOrdinals(items, options.preserveRecentItems);
+  const isPinned = (call) => pinned.has(call.resultOrdinal);
   const pinnedDecisions = calls.filter(isPinned).map((call) => ({ call, keepCall: 1, keepResult: 1, action: "keep", pinned: true, reason: "pinned" }));
   const candidates = calls.filter((call) => !isPinned(call));
   if (candidates.length === 0) {
-    return { decisions: pinnedDecisions, stateStage: "full", requests: 0, asked: false };
+    return { decisions: pinnedDecisions, stateStage: "full", requests: 0, failedBatches: 0, asked: false };
   }
   const fitted = fitState(items, {
     maxStateTokens: options.maxStateTokens,
@@ -1017,19 +1101,24 @@ async function scoreCalls(items, asker, partial) {
   const batches = batchCalls(candidates, tokens, options.maxRequestTokens);
   const deadline = options.deadlineMs === void 0 ? void 0 : Date.now() + options.deadlineMs;
   let requests = 0;
+  let failedBatches = 0;
   const decisions = [];
   for (const batch of batches) {
     if (deadline !== void 0 && Date.now() > deadline) {
+      failedBatches += 1;
       decisions.push(...batch.map((call) => unanswered(call)));
       continue;
     }
     requests += 1;
-    decisions.push(...await scoreBatch(batch, fitted.state, asker, options.keepThreshold));
+    const scored = await scoreBatch(batch, fitted.state, asker, options.keepThreshold);
+    if (scored === null) failedBatches += 1;
+    decisions.push(...scored ?? batch.map(unanswered));
   }
   return {
     decisions: [...pinnedDecisions, ...decisions],
     stateStage: fitted.stage,
     requests,
+    failedBatches,
     asked: true
   };
 }
@@ -1056,7 +1145,7 @@ async function scoreBatch(batch, state, asker, threshold) {
       };
     });
   } catch {
-    return batch.map(unanswered);
+    return null;
   }
 }
 
@@ -1100,7 +1189,7 @@ async function runPreCompact(input, config, env = process.env, asker) {
   if (items.length === 0) {
     return { continue: true, note: "fast-jev: nothing new to score" };
   }
-  const bytesAtScore = (await stat2(input.transcriptPath)).size;
+  const bytesAtScore = await stat(input.transcriptPath).then((info) => info.size).catch(() => 0);
   const scored = await scoreCalls(items, transport, {
     keepThreshold: config.keepThreshold,
     preserveRecentItems: config.preserveRecentItems,
@@ -1143,9 +1232,10 @@ async function runPreCompact(input, config, env = process.env, asker) {
   const resultDrops = archive.items.filter((item) => item.action === "drop_result").length;
   const callDrops = archive.items.filter((item) => item.action === "drop_call").length;
   void archivePath;
+  const failedNote = scored.failedBatches > 0 ? `; ${scored.failedBatches} batch(es) unanswered` : "";
   return {
     continue: true,
-    systemMessage: `fast-jev: scored ${archive.items.length} tool calls (${keeps} keep / ${resultDrops} result-drop / ${callDrops} call-drop) over ${stats.parsedItems} live items`
+    systemMessage: `fast-jev: scored ${archive.items.length} tool calls (${keeps} keep / ${resultDrops} result-drop / ${callDrops} call-drop) over ${items.length} live items` + failedNote
   };
 }
 
@@ -1155,39 +1245,33 @@ var FINGERPRINT_HEAD = 200;
 function fingerprint(text) {
   return createHash("sha256").update(text).digest("hex");
 }
-function callIdInHistory(item, history) {
-  return history.some(({ item: candidate }) => {
-    if (candidate.kind !== "function_call" && candidate.kind !== "custom_tool_call") return false;
-    return candidate.callId === item.callId;
-  });
+function indexHistory(history) {
+  const callIds = /* @__PURE__ */ new Set();
+  for (const { item } of history) {
+    if (item.kind === "function_call" || item.kind === "custom_tool_call") callIds.add(item.callId);
+  }
+  const texts = history.map(({ item }) => itemText(item));
+  return { callIds, texts, hashes: new Set(texts.map(fingerprint)) };
 }
-function textInHistory(needle, texts) {
+function textInHistory(needle, index) {
   if (needle === "") return true;
-  const head = needle.slice(0, FINGERPRINT_HEAD);
-  const hashes = new Set(texts.map(fingerprint));
-  if (hashes.has(fingerprint(needle))) return true;
+  if (index.hashes.has(fingerprint(needle))) return true;
   if (needle.length >= FINGERPRINT_HEAD) {
-    return texts.some((text) => text.includes(head));
+    const head = needle.slice(0, FINGERPRINT_HEAD);
+    return index.texts.some((text) => text.includes(head));
   }
   return false;
 }
-function membership(item, history) {
-  if (callIdInHistory(item, history)) return "present_by_call_id";
-  const texts = history.map(({ item: candidate }) => itemText(candidate));
-  return textInHistory(item.outputText, texts) ? "present_by_fingerprint" : "missing";
-}
-function headTail2(text, maxChars) {
-  if (text.length <= maxChars) return text;
-  if (maxChars === 0) return "";
-  const head = Math.floor(maxChars * 0.7);
-  const tail = maxChars - head;
-  return `${text.slice(0, head)}\u2026[${text.length - maxChars} chars omitted]${text.slice(text.length - tail)}`;
+function membershipIn(item, index) {
+  if (index.callIds.has(item.callId)) return "present_by_call_id";
+  return textInHistory(item.outputText, index) ? "present_by_fingerprint" : "missing";
 }
 function collectCandidates(archive, history, noteChars) {
+  const index = indexHistory(history);
   const candidates = [];
   for (const item of archive.items) {
     if (item.action === "drop_call") continue;
-    if (membership(item, history) !== "missing") continue;
+    if (membershipIn(item, index) !== "missing") continue;
     if (item.action === "keep") {
       candidates.push({
         item,
@@ -1216,7 +1300,7 @@ function rankAndFit(candidates, maxTotalChars, perItemChars) {
   const fitted = [];
   let used = 0;
   for (const candidate of ranked) {
-    const content = headTail2(candidate.content, perItemChars);
+    const content = headTail(candidate.content, perItemChars);
     if (used + content.length > maxTotalChars) continue;
     fitted.push({ ...candidate, content });
     used += content.length;
@@ -1224,17 +1308,21 @@ function rankAndFit(candidates, maxTotalChars, perItemChars) {
   return fitted;
 }
 function buildAdditionalContext(candidates, droppedCount) {
-  const lines = [
-    `<fast-jev-compaction: the built-in summary lost ${droppedCount} tool result(s) that were scored as still required. Verbatim content follows; treat it as part of the earlier conversation.>`
-  ];
+  const shown = candidates.length;
+  const intro = `<fast-jev-compaction: the built-in summary lost ${droppedCount} tool result(s) that were scored as still required; showing ${shown}. Verbatim content follows; treat it as part of the earlier conversation.>`;
+  const lines = [intro];
   candidates.forEach((candidate, index) => {
     const { item } = candidate;
     const label = `[${index + 1}] tool ${item.name} (call ${item.callId}, score ${candidate.score.toFixed(2)})`;
     if (candidate.reason === "call_note") {
-      lines.push(`${label}`, `    input: ${candidate.content}`, "    output was dropped intentionally; re-run the tool if needed");
+      lines.push(
+        label,
+        `    input: ${candidate.content}`,
+        "    output was dropped intentionally; re-run the tool if needed"
+      );
       return;
     }
-    lines.push(`${label}`, `    output:`, ...candidate.content.split("\n").map((line) => `    ${line}`));
+    lines.push(label, "    output:", ...candidate.content.split("\n").map((line) => `    ${line}`));
   });
   lines.push("</fast-jev-compaction>");
   return lines.join("\n");
@@ -1242,6 +1330,7 @@ function buildAdditionalContext(candidates, droppedCount) {
 
 // src/hooks/session-start.ts
 init_config();
+var CALL_NOTE_CHARS = 300;
 function parseSessionStartInput(raw) {
   let parsed;
   try {
@@ -1251,13 +1340,10 @@ function parseSessionStartInput(raw) {
   }
   if (typeof parsed !== "object" || parsed === null) return null;
   const record2 = parsed;
-  const transcriptPath = record2["transcript_path"];
-  if (typeof transcriptPath !== "string" || transcriptPath === "") return null;
-  return {
-    sessionId: typeof record2["session_id"] === "string" ? record2["session_id"] : "unknown",
-    source: typeof record2["source"] === "string" ? record2["source"] : "unknown",
-    transcriptPath
-  };
+  const sessionId = typeof record2["session_id"] === "string" ? record2["session_id"] : "unknown";
+  const source = typeof record2["source"] === "string" ? record2["source"] : "unknown";
+  const transcriptPath = typeof record2["transcript_path"] === "string" && record2["transcript_path"] !== "" ? record2["transcript_path"] : void 0;
+  return { sessionId, source, transcriptPath };
 }
 async function runSessionStart(raw, config, env = process.env) {
   const input = parseSessionStartInput(raw);
@@ -1268,30 +1354,40 @@ async function runSessionStart(raw, config, env = process.env) {
   const hit = await findLatestArchive(
     dataDir,
     input.sessionId,
-    input.transcriptPath,
+    input.transcriptPath ?? "",
     config.archiveTtlHours
   );
   if (hit === null) {
     return { note: "fast-jev: no fresh archive for this compaction" };
   }
-  const { transcript } = await parseTranscriptFile(input.transcriptPath);
-  const history = effectiveHistory(transcript);
-  const candidates = collectCandidates(hit.archive, history, 300);
-  await markConsumed(hit.path);
+  let history = [];
+  if (input.transcriptPath !== void 0) {
+    const { transcript } = await parseTranscriptFile(input.transcriptPath);
+    if (transcript.lastCompacted === void 0) {
+      return { note: "fast-jev: transcript has no compaction record yet; skipping to avoid false negatives" };
+    }
+    history = effectiveHistory(transcript);
+  } else {
+    history = [];
+  }
+  const candidates = collectCandidates(hit.archive, history, CALL_NOTE_CHARS);
   if (candidates.length === 0) {
+    await claimArchive(hit.path);
     return { note: "fast-jev: archive processed; the summary kept everything that mattered" };
   }
   const fitted = rankAndFit(candidates, config.maxBackfillChars, config.perItemChars);
   if (fitted.length === 0) {
+    await claimArchive(hit.path);
     return { note: "fast-jev: backfill candidates exceeded the character budget" };
   }
-  return {
-    suppressOutput: true,
+  const outcome = {
     hookSpecificOutput: {
       hookEventName: "SessionStart",
       additionalContext: buildAdditionalContext(fitted, candidates.length)
     }
   };
+  await claimArchive(hit.path);
+  return outcome;
 }
 
 // src/cli.ts
@@ -1304,10 +1400,22 @@ function writeOutcome(outcome) {
   process.stdout.write(JSON.stringify(wirePayload(outcome)) + "\n");
 }
 async function runHook(event) {
-  const raw = await readStdin();
+  process.stdout.on("error", () => process.exit(0));
+  let raw = "";
+  try {
+    raw = await readStdin();
+  } catch (error) {
+    process.stderr.write(`fast-jev: ${event} stdin unreadable: ${String(error)}
+`);
+    writeOutcome({});
+    return 0;
+  }
   try {
     if (process.env["FAST_JEV_RECORD"] === "1") {
-      await writeCapture(event, raw);
+      await writeCapture(event, raw).catch((error) => {
+        process.stderr.write(`fast-jev: probe capture failed: ${String(error)}
+`);
+      });
     }
     const config = await loadConfig();
     let outcome;

@@ -5,6 +5,7 @@ import { fitState, stateTokens } from './jev/state.js'
 import type { StateStage } from './jev/state.js'
 import { noulAnswer } from './jev/request.js'
 import type { JevAsker, JevState } from './jev/types.js'
+import { recentOrdinals } from './ir.js'
 import type { StampedHistory } from './ir.js'
 
 export interface ScoreOptions {
@@ -39,6 +40,8 @@ export interface ScoreResult {
   readonly decisions: readonly CallDecision[]
   readonly stateStage: StateStage
   readonly requests: number
+  /** Batches that could not be scored (error/deadline) — their calls stay keep. */
+  readonly failedBatches: number
   readonly asked: boolean
 }
 
@@ -62,12 +65,13 @@ export async function scoreCalls(
   const options: ScoreOptions = { ...DEFAULT_SCORE_OPTIONS, ...partial }
   const calls = pairToolCalls(items)
   if (calls.length === 0) {
-    return { decisions: [], stateStage: 'full', requests: 0, asked: false }
+    return { decisions: [], stateStage: 'full', requests: 0, failedBatches: 0, asked: false }
   }
 
-  const lastOrdinal = items[items.length - 1]?.ordinal ?? 0
-  const pinnedCutoff = lastOrdinal - options.preserveRecentItems + 1
-  const isPinned = (call: ToolCallObservation): boolean => call.resultOrdinal >= pinnedCutoff
+  // Pin by list position, not rollout line number — rollouts interleave
+  // event/usage lines, so line-number windows would often miss the latest calls.
+  const pinned = recentOrdinals(items, options.preserveRecentItems)
+  const isPinned = (call: ToolCallObservation): boolean => pinned.has(call.resultOrdinal)
 
   const pinnedDecisions: CallDecision[] = calls
     .filter(isPinned)
@@ -75,7 +79,7 @@ export async function scoreCalls(
   const candidates = calls.filter((call) => !isPinned(call))
 
   if (candidates.length === 0) {
-    return { decisions: pinnedDecisions, stateStage: 'full', requests: 0, asked: false }
+    return { decisions: pinnedDecisions, stateStage: 'full', requests: 0, failedBatches: 0, asked: false }
   }
 
   const fitted = fitState(items, {
@@ -87,19 +91,24 @@ export async function scoreCalls(
   const deadline = options.deadlineMs === undefined ? undefined : Date.now() + options.deadlineMs
 
   let requests = 0
+  let failedBatches = 0
   const decisions: CallDecision[] = []
   for (const batch of batches) {
     if (deadline !== undefined && Date.now() > deadline) {
+      failedBatches += 1
       decisions.push(...batch.map((call) => unanswered(call)))
       continue
     }
     requests += 1
-    decisions.push(...await scoreBatch(batch, fitted.state, asker, options.keepThreshold))
+    const scored = await scoreBatch(batch, fitted.state, asker, options.keepThreshold)
+    if (scored === null) failedBatches += 1
+    decisions.push(...(scored ?? batch.map(unanswered)))
   }
   return {
     decisions: [...pinnedDecisions, ...decisions],
     stateStage: fitted.stage,
     requests,
+    failedBatches,
     asked: true,
   }
 }
@@ -108,12 +117,13 @@ function unanswered(call: ToolCallObservation): CallDecision {
   return { call, keepCall: 1, keepResult: 1, action: 'keep', pinned: false, reason: 'unanswered' }
 }
 
+/** null = the whole batch failed and its calls stay keep/unanswered. */
 async function scoreBatch(
   batch: readonly ToolCallObservation[],
   state: JevState,
   asker: JevAsker,
   threshold: number,
-): Promise<CallDecision[]> {
+): Promise<CallDecision[] | null> {
   const questions = batch.reduce<Record<string, ReturnType<typeof questionsFor>[string]>>(
     (all, call) => ({ ...all, ...questionsFor(call) }),
     {},
@@ -133,6 +143,6 @@ async function scoreBatch(
       } as const
     })
   } catch {
-    return batch.map(unanswered)
+    return null
   }
 }

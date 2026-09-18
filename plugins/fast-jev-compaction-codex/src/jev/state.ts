@@ -1,6 +1,7 @@
-import { itemText } from '../ir.js'
+import { itemText, recentOrdinals } from '../ir.js'
 import type { JevState, StateEntry } from './types.js'
 import type { StampedHistory } from '../ir.js'
+import { cap, headTail } from '../text.js'
 
 export const STATE_CONTEXT =
   'A coding session is being compacted to free context. `history` lists the conversation ' +
@@ -38,7 +39,6 @@ const STAGE_INPUT_LIMITS: readonly { stage: StateStage; maxInputChars: number }[
 
 const ABRIDGED_TEXT_CHARS = 400
 const COLLAPSED_TEXT_CHARS = 80
-const ELLIPSIS = '…'
 
 /**
  * Token estimate without a tokenizer: CJK counts ~1 token per char, letters
@@ -125,26 +125,6 @@ export function buildState(items: readonly StampedHistory[], goal?: string): Jev
   }
 }
 
-function pinnedOrdinals(items: readonly StampedHistory[], preserveRecentItems: number): Set<number> {
-  const pinned = new Set<number>()
-  for (let index = Math.max(0, items.length - preserveRecentItems); index < items.length; index += 1) {
-    const ordinal = items[index]?.ordinal
-    if (ordinal !== undefined) pinned.add(ordinal)
-  }
-  return pinned
-}
-
-function cap(text: string, maxChars: number): string {
-  return text.length <= maxChars ? text : text.slice(0, maxChars) + ELLIPSIS
-}
-
-function headTail(text: string, maxChars: number): string {
-  if (text.length <= maxChars) return text
-  const head = Math.floor(maxChars * 0.7)
-  const tail = maxChars - head
-  return `${text.slice(0, head)}${ELLIPSIS}[${text.length - maxChars} chars omitted]${text.slice(text.length - tail)}`
-}
-
 function transform(
   state: JevState,
   pinned: Set<number>,
@@ -160,7 +140,7 @@ function transform(
  * because a hook must never fail the compaction.
  */
 export function fitState(items: readonly StampedHistory[], options: FitOptions): FittedState {
-  const pinned = pinnedOrdinals(items, options.preserveRecentItems)
+  const pinned = recentOrdinals(items, options.preserveRecentItems)
   let stage: StateStage = 'full'
   let state = buildState(items)
 

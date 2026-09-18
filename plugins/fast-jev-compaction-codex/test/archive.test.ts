@@ -8,7 +8,7 @@ import {
   archiveDirFor,
   cleanupExpired,
   findLatestArchive,
-  markConsumed,
+  claimArchive,
   writeArchive,
 } from '../src/archive.js'
 import type { DecisionArchive } from '../src/archive.js'
@@ -87,7 +87,7 @@ describe('archive roundtrip', () => {
   it('ignores consumed archives', async () => {
     const archive = makeArchive()
     const written = await writeArchive(dataDir, archive)
-    await markConsumed(written)
+    await claimArchive(written)
     expect(await readFile(`${written}.consumed`, 'utf8')).toContain('T')
     expect(await findLatestArchive(dataDir, 'sess-1', archive.transcriptPath, 2)).toBeNull()
   })

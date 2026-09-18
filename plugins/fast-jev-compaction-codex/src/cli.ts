@@ -25,10 +25,22 @@ function writeOutcome(outcome: HookOutcome): void {
  * invocation also tees its stdin to the probe directory for offline analysis.
  */
 async function runHook(event: HookEventName): Promise<number> {
-  const raw = await readStdin()
+  // A broken stdout pipe must never surface as an unhandled error / nonzero exit.
+  process.stdout.on('error', () => process.exit(0))
+  let raw = ''
+  try {
+    raw = await readStdin()
+  } catch (error) {
+    process.stderr.write(`fast-jev: ${event} stdin unreadable: ${String(error)}\n`)
+    writeOutcome({})
+    return 0
+  }
   try {
     if (process.env['FAST_JEV_RECORD'] === '1') {
-      await writeCapture(event, raw)
+      // Recording is diagnostics, not the mission — never let it fail the hook.
+      await writeCapture(event, raw).catch((error: unknown) => {
+        process.stderr.write(`fast-jev: probe capture failed: ${String(error)}\n`)
+      })
     }
     const config: FastJevConfig = await loadConfig()
     let outcome: HookOutcome

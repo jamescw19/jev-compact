@@ -38,6 +38,8 @@ function snapshotEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   }
   for (const key of Object.keys(env)) {
     if (/^(PLUGIN|CODEX|CLAUDE|FAST_JEV)/i.test(key) && !(key in snapshot)) {
+      // Never capture anything that smells like a credential.
+      if (/KEY|TOKEN|SECRET|PASSWORD/i.test(key)) continue
       snapshot[key] = env[key] ?? ''
     }
   }
@@ -61,7 +63,7 @@ export async function writeCapture(event: string, stdinRaw: string): Promise<str
   await mkdir(dir, { recursive: true })
   const stamp = record.capturedAt.replace(/[:.]/g, '-')
   const file = path.join(dir, `${stamp}-${sanitizeEventName(event)}-${process.pid}.json`)
-  await writeFile(file, JSON.stringify(record, null, 2) + '\n', 'utf8')
+  await writeFile(file, JSON.stringify(record, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 })
   process.stderr.write(`fast-jev probe: captured ${event} -> ${file}\n`)
   return file
 }
@@ -132,8 +134,10 @@ async function list(): Promise<number> {
   }
   for (const entry of entries.filter((name) => name.endsWith('.json')).sort()) {
     const full = path.join(dir, entry)
-    const info = await stat(full)
-    process.stdout.write(`${entry}  (${info.size} bytes)\n`)
+    const size = await stat(full)
+      .then((info) => info.size)
+      .catch(() => 0)
+    process.stdout.write(`${entry}  (${size} bytes)\n`)
   }
   return 0
 }

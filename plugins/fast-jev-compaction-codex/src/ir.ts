@@ -97,6 +97,19 @@ export function liveItems(transcript: Transcript): readonly StampedHistory[] {
   return last.items.filter((stamped) => stamped.ordinal > compactedAt)
 }
 
+/**
+ * Ordinals of the most recent `count` items (by list position, not by
+ * rollout line number — rollout files interleave non-history event lines).
+ */
+export function recentOrdinals(items: readonly StampedHistory[], count: number): Set<number> {
+  const pinned = new Set<number>()
+  for (let index = Math.max(0, items.length - count); index < items.length; index += 1) {
+    const ordinal = items[index]?.ordinal
+    if (ordinal !== undefined) pinned.add(ordinal)
+  }
+  return pinned
+}
+
 /** Concatenated text of an item — used for Jev state and fingerprints alike. */
 export function itemText(item: HistoryItem): string {
   switch (item.kind) {
