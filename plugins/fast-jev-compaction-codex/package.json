@@ -1,0 +1,20 @@
+{
+  "name": "fast-jev-compaction-codex",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Jev-scored compaction backfill for OpenAI Codex CLI sessions",
+  "license": "MIT",
+  "scripts": {
+    "build": "bun run scripts/build.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}

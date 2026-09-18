@@ -1,0 +1,20 @@
+{
+  "name": "fast-jev",
+  "interface": {
+    "displayName": "Fast Jev"
+  },
+  "plugins": [
+    {
+      "name": "fast-jev-compaction-codex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/fast-jev-compaction-codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
