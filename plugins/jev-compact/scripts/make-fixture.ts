@@ -25,6 +25,18 @@ async function* rolloutFiles(dir: string): AsyncGenerator<string> {
   }
 }
 
+/** Known secret-shaped strings are scrubbed from fixtures unconditionally. */
+const SECRET_PATTERNS: readonly [RegExp, string][] = [
+  [/wx[0-9a-f]{16}/gi, 'wxREDACTED00000000'],
+  [/ghp_[A-Za-z0-9]{20,}/g, 'ghp_REDACTED'],
+  [/sk-[A-Za-z0-9]{20,}/g, 'sk-REDACTED'],
+  [/AKIA[A-Z0-9]{16}/g, 'AKIAREDACTED0000'],
+]
+
+function scrubSecrets(text: string): string {
+  return SECRET_PATTERNS.reduce((acc, [pattern, replacement]) => acc.replace(pattern, replacement), text)
+}
+
 function walkRedact(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(walkRedact)
   if (typeof value === 'object' && value !== null) {
@@ -36,7 +48,7 @@ function walkRedact(value: unknown): unknown {
     )
   }
   if (typeof value === 'string') {
-    const text = value.split(os.homedir()).join('/Users/dev')
+    const text = scrubSecrets(value.split(os.homedir()).join('/Users/dev'))
     return text.length <= MAX_STRING
       ? text
       : `${text.slice(0, MAX_STRING)}…[+${text.length - MAX_STRING} chars]`
