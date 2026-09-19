@@ -30,7 +30,7 @@ function walkRedact(value: unknown): unknown {
   if (typeof value === 'object' && value !== null) {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([key, child]) => [
-        key,
+        key.split(os.homedir()).join('/Users/dev'),
         key === 'encrypted_content' ? JSON.parse(REDACTED) : walkRedact(child),
       ]),
     )

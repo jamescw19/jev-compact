@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        working-directory: plugins/jev-compact
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        working-directory: plugins/jev-compact
+        run: bun run typecheck
+      - name: Build
+        working-directory: plugins/jev-compact
+        run: bun run build
+      - name: Test
+        working-directory: plugins/jev-compact
+        run: bun run test
+      - name: Dist is up to date
+        working-directory: plugins/jev-compact
+        run: git diff --exit-code dist/
