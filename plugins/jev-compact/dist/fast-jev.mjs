@@ -1473,7 +1473,7 @@ async function runHook(event) {
 }
 function usage() {
   return [
-    "fast-jev-compaction-codex",
+    "jev-compact",
     "",
     "usage:",
     "  fast-jev.mjs pre-compact          PreCompact hook entrypoint",

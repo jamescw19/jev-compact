@@ -1,5 +1,5 @@
 {
-  "name": "fast-jev-compaction-codex",
+  "name": "jev-compact",
   "version": "0.1.0",
   "private": true,
   "type": "module",

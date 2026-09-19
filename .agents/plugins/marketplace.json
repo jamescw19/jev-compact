@@ -5,10 +5,10 @@
   },
   "plugins": [
     {
-      "name": "fast-jev-compaction-codex",
+      "name": "jev-compact",
       "source": {
         "source": "local",
-        "path": "./plugins/fast-jev-compaction-codex"
+        "path": "./plugins/jev-compact"
       },
       "policy": {
         "installation": "AVAILABLE",

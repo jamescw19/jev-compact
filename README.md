@@ -1,4 +1,4 @@
-# fast-jev-compaction-codex
+# jev-compact
 
 Jev-scored context compaction for [OpenAI Codex CLI](https://developers.openai.com/codex) —
 inspired by [tamaratran/fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction)
@@ -51,11 +51,11 @@ Requires: Codex CLI ≥ 0.155 with `[features] hooks = true` (default on), and
 
 ```bash
 # from a local checkout
-codex plugin marketplace add /path/to/fast-jev-compaction-codex
+codex plugin marketplace add /path/to/jev-compact
 # or straight from git
-codex plugin marketplace add https://github.com/fatelei/fast-jev-compaction-codex.git
+codex plugin marketplace add https://github.com/fatelei/jev-compact.git
 
-codex plugin add fast-jev-compaction-codex@fast-jev
+codex plugin add jev-compact@fast-jev
 codex plugin list   # expect: installed, enabled
 ```
 
@@ -102,7 +102,7 @@ All values are range-clamped; unknown keys are ignored.
 ## Development
 
 ```bash
-cd plugins/fast-jev-compaction-codex
+cd plugins/jev-compact
 bun install
 bun run build        # esbuild → dist/fast-jev.mjs (committed, zero runtime deps)
 bun run test         # vitest, ~87% line coverage
@@ -110,8 +110,8 @@ bun run typecheck
 ```
 
 Local iteration on an installed plugin: bump the version cachebuster
-(`0.1.0+codex.<timestamp>` in `plugins/fast-jev-compaction-codex/.codex-plugin/plugin.json`)
-and re-run `codex plugin add fast-jev-compaction-codex@fast-jev`.
+(`0.1.0+codex.<timestamp>` in `plugins/jev-compact/.codex-plugin/plugin.json`)
+and re-run `codex plugin add jev-compact@fast-jev`.
 
 ### Capturing real hook payloads
 
