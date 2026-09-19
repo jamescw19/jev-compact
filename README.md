@@ -53,7 +53,7 @@ Requires: Codex CLI ≥ 0.155 with `[features] hooks = true` (default on), and
 # from a local checkout
 codex plugin marketplace add /path/to/fast-jev-compaction-codex
 # or straight from git
-codex plugin marketplace add https://github.com/<you>/fast-jev-compaction-codex.git
+codex plugin marketplace add https://github.com/fatelei/fast-jev-compaction-codex.git
 
 codex plugin add fast-jev-compaction-codex@fast-jev
 codex plugin list   # expect: installed, enabled
