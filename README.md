@@ -1,13 +1,14 @@
-# jev-compact
+# jev-compact — Gemini Decisions fork
 
-Jev-scored context compaction for [OpenAI Codex CLI](https://developers.openai.com/codex) —
-inspired by [tamaratran/fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction)
-for Claude Code, with all code written from scratch against Codex's own hook system.
+Gemini-scored context compaction for [OpenAI Codex CLI](https://developers.openai.com/codex).
+Fork of [fatelei/jev-compact](https://github.com/fatelei/jev-compact), using the
+[Google Gemini Decisions API](https://aistudio.google.com/docs/decisions-api)
+instead of TypeSafe Jev. No Jev account or key required.
 
 Before Codex compacts a session, every tool call and result is scored by the
-TypeSafe **Jev** model (`noul` probability questions: "does this call still
+**gemini-decision-1** model (`noul` probability questions: "does this call still
 matter?", "is this output still needed verbatim?"). Codex then compacts with
-its built-in summary as usual. Afterwards, any output Jev scored as *still
+its built-in summary as usual. Afterwards, any output Gemini scored as *still
 required* that the summary actually dropped is **re-injected verbatim** into
 the next model request.
 
@@ -17,7 +18,7 @@ the next model request.
         ┌─────────────────────┐
         │ PreCompact hook     │  read rollout JSONL → live segment
         │ (manual + auto)     │  → pair tool calls by call_id
-        │                     │  → Jev noul scoring (batched)
+        │                     │  → Gemini noul scoring (batched)
         │                     │  → three-level decision per call:
         │                     │     keep / drop_result / drop_call
         │                     │  → archive decisions (atomic, TTL)
@@ -41,7 +42,7 @@ the next model request.
 **Honest scope note:** Codex 0.155 hook outputs cannot *replace* compaction
 results (unlike Claude Code's `session.compact` function hooks, which return a
 full message list). This plugin therefore guides + repairs the built-in
-compaction instead of replacing it: the summary still runs, but content Jev
+compaction instead of replacing it: the summary still runs, but content Gemini
 judged critical survives verbatim.
 
 ## Install
@@ -53,7 +54,7 @@ Requires: Codex CLI ≥ 0.155 with `[features] hooks = true` (default on), and
 # from a local checkout
 codex plugin marketplace add /path/to/jev-compact
 # or straight from git
-codex plugin marketplace add https://github.com/fatelei/jev-compact.git
+codex plugin marketplace add https://github.com/jamescw19/jev-compact.git
 
 codex plugin add jev-compact@fast-jev
 codex plugin list   # expect: installed, enabled
@@ -65,32 +66,49 @@ skipped — if nothing happens, that's why.
 
 ### API key
 
-The hook reads `TYPESAFE_API_KEY` from its environment, falling back to
-`apiKey` in the config file:
+The hook reads `GEMINI_API_KEY` from its environment, falling back to
+`apiKey` in the config file. An existing exported `GEMINI_API_KEY` needs no
+configuration. Launch Codex from a shell that exports it.
 
-```bash
-# ~/.codex/fast-jev-compaction.json
+Optional settings (no key needs to be saved here):
+
+```jsonc
+// ~/.codex/fast-jev-compaction.json
 {
-  "apiKey": "tsk-...",
   "keepThreshold": 0.5,
   "maxBackfillChars": 8000
 }
 ```
 
 Without a key the plugin is a no-op: compaction proceeds untouched.
+`TYPESAFE_API_KEY` is ignored. Scoring sends the fitted session context and
+tool questions to Google over HTTPS. API failures keep calls conservatively
+and allow built-in compaction to continue.
+
+### Existing installations
+
+Plugin ID `jev-compact@fast-jev`, config filename, data paths, and the
+`jevRequestTimeoutMs` / `jevDeadlineMs` settings retain their upstream names.
+The display name is **Gemini Compact**. These names do not select Jev.
+Remove any old `model: "jev-latest"`, TypeSafe `baseUrl`, or TypeSafe `apiKey`
+from the config before using this fork.
+
+If the upstream `fast-jev` marketplace is already registered, remove its
+plugin and marketplace before adding this fork so Codex loads the right source.
 
 ## Configuration
 
-`$CODEX_HOME/fast-jev-compaction.json` (env `TYPESAFE_API_KEY` overrides `apiKey`).
+`$CODEX_HOME/fast-jev-compaction.json` (env `GEMINI_API_KEY` overrides `apiKey`).
 All values are range-clamped; unknown keys are ignored.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `model` | `jev-latest` | TypeSafe model name |
+| `model` | `gemini-decision-1` | Gemini Decisions model name |
+| `baseUrl` | `https://generativelanguage.googleapis.com/v1beta/decisions` | full endpoint override; receives the API key, so use only trusted endpoints |
 | `keepThreshold` | `0.5` | noul probability ≥ threshold → keep |
 | `preserveRecentItems` | `8` | most recent items are pinned (never dropped, never re-injected) |
 | `maxStateTokens` | `25000` | state budget before staged compression |
-| `maxRequestTokens` | `30000` | per-request cap (System One limit is 32k) |
+| `maxRequestTokens` | `30000` | conservative estimated request budget (config cap: 32,000) |
 | `jevRequestTimeoutMs` | `60000` | per-request timeout |
 | `jevDeadlineMs` | `240000` | total scoring deadline (hook timeout is 600s) |
 | `maxBackfillChars` | `8000` | total additionalContext budget |
@@ -98,6 +116,11 @@ All values are range-clamped; unknown keys are ignored.
 | `archiveTtlHours` | `2` | decision archive freshness window |
 | `dataDir` | `$PLUGIN_DATA` | archive/probe/log storage |
 | `logLevel` | `info` | `debug` / `info` / `silent` (stderr) |
+
+Requests use `x-goog-api-key`, serialized context in `input`, and native
+`true_description` / `false_description` criteria. Batches contain at most
+1,000 questions. Long or non-ASCII tool call IDs receive stable hashed question
+keys to satisfy Gemini's 64-character key limit; archived call IDs stay intact.
 
 ## Development
 
@@ -110,7 +133,7 @@ bun run typecheck
 ```
 
 Local iteration on an installed plugin: bump the version cachebuster
-(`0.1.0+codex.<timestamp>` in `plugins/jev-compact/.codex-plugin/plugin.json`)
+(`0.2.0+codex.<timestamp>` in `plugins/jev-compact/.codex-plugin/plugin.json`)
 and re-run `codex plugin add jev-compact@fast-jev`.
 
 ### Capturing real hook payloads

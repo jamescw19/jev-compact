@@ -1,7 +1,7 @@
 {
   "name": "fast-jev",
   "interface": {
-    "displayName": "Fast Jev"
+    "displayName": "Gemini Compaction"
   },
   "plugins": [
     {
