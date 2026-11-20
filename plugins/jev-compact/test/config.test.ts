@@ -62,7 +62,7 @@ describe('loadConfig', () => {
   it('reads the config file from CODEX_HOME and applies env key override', async () => {
     const file = configPath({ CODEX_HOME: homeDir })
     await writeFile(file, JSON.stringify({ model: 'jev-from-file', apiKey: 'file-key' }))
-    const config = await loadConfig({ CODEX_HOME: homeDir, TYPESAFE_API_KEY: 'env-key' })
+    const config = await loadConfig({ CODEX_HOME: homeDir, GEMINI_API_KEY: 'env-key' })
     expect(config.model).toBe('jev-from-file')
     expect(config.apiKey).toBe('env-key')
   })

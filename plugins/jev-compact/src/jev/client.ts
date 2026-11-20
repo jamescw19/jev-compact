@@ -2,7 +2,7 @@ import { buildJevRequest, parseJevResponse } from './request.js'
 import type { JevAsker, JevQuestions, JevResponse, JevState } from './types.js'
 
 export interface JevClientOptions {
-  /** Defaults to `process.env.TYPESAFE_API_KEY`. */
+  /** Defaults to `process.env.GEMINI_API_KEY`. */
   readonly apiKey?: string
   readonly model?: string
   readonly baseUrl?: string
@@ -27,7 +27,7 @@ function isRetryable(status: number): boolean {
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
- * Default `JevAsker` backed by `fetch` against the TypeSafe System One
+ * Default `JevAsker` backed by `fetch` against the Gemini Decisions
  * endpoint, with a per-request timeout and a single retry.
  */
 export class JevClient implements JevAsker {
@@ -38,11 +38,11 @@ export class JevClient implements JevAsker {
   }
 
   private apiKey(): string {
-    const key = this.options.apiKey ?? process.env['TYPESAFE_API_KEY']
+    const key = this.options.apiKey ?? process.env['GEMINI_API_KEY']
     if (key === undefined || key.trim() === '') {
-      throw new Error('TYPESAFE_API_KEY is not configured')
+      throw new Error('GEMINI_API_KEY is not configured')
     }
-    return key
+    return key.trim()
   }
 
   async ask(state: JevState, questions: JevQuestions): Promise<JevResponse> {
@@ -56,7 +56,7 @@ export class JevClient implements JevAsker {
     const retries = this.options.retries ?? DEFAULT_RETRIES
     const backoffMs = this.options.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS
 
-    let lastError: unknown = new Error('jev: request never ran')
+    let lastError: unknown = new Error('gemini: request never ran')
     for (let attempt = 0; attempt <= retries; attempt += 1) {
       if (attempt > 0) await sleep(backoffMs)
       const controller = new AbortController()
@@ -84,7 +84,7 @@ export class JevClient implements JevAsker {
       // (bad status, malformed body) propagate without a retry.
       if (ok) return parseJevResponse(status, true, text)
       if (!isRetryable(status)) return parseJevResponse(status, false, text)
-      lastError = new Error(`jev: HTTP ${status}`)
+      lastError = new Error(`gemini: HTTP ${status}`)
     }
     throw lastError
   }

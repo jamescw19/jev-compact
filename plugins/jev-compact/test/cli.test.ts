@@ -25,7 +25,7 @@ function runCli(
 ): Promise<CliResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [DIST, ...args], {
-      env: { ...process.env, ...env },
+      env: { ...process.env, GEMINI_API_KEY: '', ...env },
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     let stdout = ''
@@ -78,7 +78,7 @@ describe.skipIf(!existsSync(DIST))('cli (built artifact)', () => {
     )
     expect(result.code).toBe(0)
     expect(JSON.parse(result.stdout)).toEqual({ continue: true })
-    expect(result.stderr).toContain('TYPESAFE_API_KEY')
+    expect(result.stderr).toContain('GEMINI_API_KEY')
   })
 
   it('no-ops SessionStart for non-compact sources', async () => {

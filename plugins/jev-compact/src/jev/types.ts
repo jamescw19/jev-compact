@@ -1,12 +1,12 @@
-/** TypeSafe System One (Jev) scoring protocol types and transport seam. */
+/** Gemini Decisions scoring types. Jev names remain for upstream compatibility. */
 
-export const SYSTEM_ONE_URL = 'https://api.typesafe.ai/v1/systemone'
-export const DEFAULT_JEV_MODEL = 'jev-latest'
+export const GEMINI_DECISIONS_URL = 'https://generativelanguage.googleapis.com/v1beta/decisions'
+export const DEFAULT_DECISION_MODEL = 'gemini-decision-1'
 
 export interface NoulQuestion {
   readonly type: 'noul'
   readonly instructions: string
-  readonly criteria?: { readonly true?: string; readonly false?: string }
+  readonly criteria?: { readonly true_description?: string; readonly false_description?: string }
 }
 
 export type JevQuestions = Record<string, NoulQuestion>

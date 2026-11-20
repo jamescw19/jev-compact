@@ -7,7 +7,7 @@
             "type": "command",
             "command": "\"$PLUGIN_ROOT/hooks/run.sh\" pre-compact",
             "timeout": 600,
-            "statusMessage": "fast-jev: scoring tool calls"
+            "statusMessage": "Gemini: scoring tool calls"
           }
         ]
       }
@@ -19,7 +19,7 @@
             "type": "command",
             "command": "\"$PLUGIN_ROOT/hooks/run.sh\" session-start",
             "timeout": 60,
-            "statusMessage": "fast-jev: checking backfill"
+            "statusMessage": "Gemini: checking backfill"
           }
         ]
       }

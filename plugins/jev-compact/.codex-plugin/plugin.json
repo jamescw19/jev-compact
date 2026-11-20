@@ -1,7 +1,7 @@
 {
   "name": "jev-compact",
-  "version": "0.1.0",
-  "description": "Jev-scored compaction backfill for Codex sessions: scores tool calls before compaction and restores critical tool outputs verbatim after it.",
+  "version": "0.2.0",
+  "description": "Gemini Decisions-scored compaction backfill for Codex sessions: scores tool calls before compaction and restores critical tool outputs verbatim after it.",
   "author": {
     "name": "fatelei"
   },
@@ -9,15 +9,16 @@
   "keywords": [
     "compaction",
     "context",
-    "jev",
+    "gemini",
+    "decisions-api",
     "hooks"
   ],
   "hooks": "./hooks.json",
   "interface": {
-    "displayName": "Jev Compact",
-    "shortDescription": "Jev-scored context compaction backfill",
-    "longDescription": "Scores every tool call and result with the TypeSafe Jev model before Codex compacts a session, archives the verdicts, and after compaction re-injects the critical tool outputs the built-in summary dropped \u2014 verbatim \u2014 into the next model request.",
-    "developerName": "fatelei",
+    "displayName": "Gemini Compact",
+    "shortDescription": "Gemini-scored context compaction backfill",
+    "longDescription": "Scores every tool call and result with Google Gemini Decision 1 before Codex compacts a session, archives the verdicts, and after compaction re-injects critical tool outputs the built-in summary dropped verbatim into the next model request. Fork of fatelei/jev-compact.",
+    "developerName": "jamescw19",
     "category": "Productivity",
     "capabilities": [
       "Context management"

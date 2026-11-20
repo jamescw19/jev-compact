@@ -1,9 +1,9 @@
 {
   "name": "jev-compact",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Jev-scored compaction backfill for OpenAI Codex CLI sessions",
+  "description": "Gemini Decisions-scored compaction backfill for OpenAI Codex CLI sessions",
   "license": "MIT",
   "scripts": {
     "build": "bun run scripts/build.ts",

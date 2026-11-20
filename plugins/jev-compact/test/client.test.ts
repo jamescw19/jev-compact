@@ -8,21 +8,21 @@ const state: JevState = { context: 'c', goal: 'g', history: [] }
 const questions: JevQuestions = { q1: { type: 'noul', instructions: 'i' } }
 
 describe('buildJevRequest', () => {
-  it('builds an authorized POST with model, state and questions', () => {
+  it('builds an authorized POST with model, serialized input and questions', () => {
     const request = buildJevRequest({ apiKey: 'k', model: 'm', baseUrl: 'http://x' }, state, questions)
     expect(request.method).toBe('POST')
     expect(request.url).toBe('http://x')
-    expect(request.headers['authorization']).toBe('Bearer k')
-    const body = JSON.parse(request.body) as { model: string; state: JevState; questions: JevQuestions }
+    expect(request.headers['x-goog-api-key']).toBe('k')
+    const body = JSON.parse(request.body) as { model: string; input: string; questions: JevQuestions }
     expect(body.model).toBe('m')
-    expect(body.state).toEqual(state)
+    expect(JSON.parse(body.input)).toEqual(state)
     expect(body.questions).toEqual(questions)
   })
 
-  it('defaults to the System One URL and jev-latest', () => {
+  it('defaults to the Gemini Decisions URL and gemini-decision-1', () => {
     const request = buildJevRequest({ apiKey: 'k' }, state, questions)
-    expect(request.url).toBe('https://api.typesafe.ai/v1/systemone')
-    expect((JSON.parse(request.body) as { model: string }).model).toBe('jev-latest')
+    expect(request.url).toBe('https://generativelanguage.googleapis.com/v1beta/decisions')
+    expect((JSON.parse(request.body) as { model: string }).model).toBe('gemini-decision-1')
   })
 })
 
@@ -34,7 +34,7 @@ describe('parseJevResponse', () => {
   })
 
   it('throws on HTTP failure, bad JSON and missing answers', () => {
-    expect(() => parseJevResponse(500, false, 'oops')).toThrow('jev: HTTP 500')
+    expect(() => parseJevResponse(500, false, 'oops')).toThrow('gemini: HTTP 500')
     expect(() => parseJevResponse(200, true, 'not json')).toThrow('not JSON')
     expect(() => parseJevResponse(200, true, '{"nope":1}')).toThrow('answers')
   })
@@ -113,13 +113,13 @@ describe('JevClient', () => {
   })
 
   it('requires an API key', async () => {
-    const previous = process.env['TYPESAFE_API_KEY']
-    delete process.env['TYPESAFE_API_KEY']
+    const previous = process.env['GEMINI_API_KEY']
+    delete process.env['GEMINI_API_KEY']
     try {
       const client = new JevClient({ fetchImpl: async () => okResponse() })
-      await expect(client.ask(state, questions)).rejects.toThrow('TYPESAFE_API_KEY')
+      await expect(client.ask(state, questions)).rejects.toThrow('GEMINI_API_KEY')
     } finally {
-      if (previous !== undefined) process.env['TYPESAFE_API_KEY'] = previous
+      if (previous !== undefined) process.env['GEMINI_API_KEY'] = previous
     }
   })
 })
