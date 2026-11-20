@@ -97,7 +97,7 @@ describe('runPreCompact', () => {
       configWith({ apiKey: null }),
     )
     expect(outcome.continue).toBe(true)
-    expect(outcome.note).toContain('TYPESAFE_API_KEY')
+    expect(outcome.note).toContain('GEMINI_API_KEY')
   })
 
   it('no-ops when there is nothing live to score', async () => {

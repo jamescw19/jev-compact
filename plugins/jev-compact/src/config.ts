@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { DEFAULT_JEV_MODEL } from './jev/types.js'
+import { DEFAULT_DECISION_MODEL } from './jev/types.js'
 
 /** Environment variables a plugin-provided data dir may arrive under. */
 const PLUGIN_DATA_KEYS = ['PLUGIN_DATA', 'CLAUDE_PLUGIN_DATA'] as const
@@ -31,7 +31,7 @@ export interface FastJevConfig {
 
 export const DEFAULT_CONFIG: FastJevConfig = {
   apiKey: null,
-  model: DEFAULT_JEV_MODEL,
+  model: DEFAULT_DECISION_MODEL,
   baseUrl: null,
   keepThreshold: 0.5,
   preserveRecentItems: 8,
@@ -110,7 +110,7 @@ export function parseConfigJson(text: string, base: FastJevConfig = DEFAULT_CONF
   }
 }
 
-/** Load config: defaults ← config file ← `TYPESAFE_API_KEY` env override. */
+/** Load config: defaults ← config file ← `GEMINI_API_KEY` env override. */
 export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<FastJevConfig> {
   let config = DEFAULT_CONFIG
   try {
@@ -118,7 +118,7 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
   } catch {
     // No config file (or unreadable) — defaults are fine.
   }
-  const envKey = env['TYPESAFE_API_KEY']
+  const envKey = env['GEMINI_API_KEY']
   if (envKey !== undefined && envKey.trim() !== '') {
     config = { ...config, apiKey: envKey.trim() }
   }

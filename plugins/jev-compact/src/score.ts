@@ -1,6 +1,6 @@
 import { pairToolCalls } from './rollout/calls.js'
 import type { ToolCallObservation } from './rollout/calls.js'
-import { batchCalls, questionsFor } from './jev/questions.js'
+import { batchCalls, questionKeys, questionsFor } from './jev/questions.js'
 import { fitState, stateTokens } from './jev/state.js'
 import type { StateStage } from './jev/state.js'
 import { noulAnswer } from './jev/request.js'
@@ -131,15 +131,16 @@ async function scoreBatch(
   try {
     const response = await asker.ask(state, questions)
     return batch.map((call) => {
-      const keepCall = noulAnswer(response, `call_${call.callId}`) ?? 1
-      const keepResult = noulAnswer(response, `result_${call.callId}`) ?? 1
+      const keys = questionKeys(call.callId)
+      const keepCall = noulAnswer(response, keys.call) ?? 1
+      const keepResult = noulAnswer(response, keys.result) ?? 1
       return {
         call,
         keepCall,
         keepResult,
         action: decideAction(keepCall, keepResult, threshold),
         pinned: false,
-        reason: noulAnswer(response, `call_${call.callId}`) === undefined ? 'unanswered' : 'scored',
+        reason: noulAnswer(response, keys.call) === undefined ? 'unanswered' : 'scored',
       } as const
     })
   } catch {

@@ -68,7 +68,7 @@ export async function runPreCompact(
   if (transport === null) {
     return {
       continue: true,
-      note: 'fast-jev: TYPESAFE_API_KEY not configured; letting built-in compaction proceed',
+      note: 'fast-jev: GEMINI_API_KEY not configured; letting built-in compaction proceed',
     }
   }
   if (items.length === 0) {

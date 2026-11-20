@@ -9,12 +9,12 @@ var __export = (target, all) => {
 };
 
 // src/jev/types.ts
-var SYSTEM_ONE_URL, DEFAULT_JEV_MODEL;
+var GEMINI_DECISIONS_URL, DEFAULT_DECISION_MODEL;
 var init_types = __esm({
   "src/jev/types.ts"() {
     "use strict";
-    SYSTEM_ONE_URL = "https://api.typesafe.ai/v1/systemone";
-    DEFAULT_JEV_MODEL = "jev-latest";
+    GEMINI_DECISIONS_URL = "https://generativelanguage.googleapis.com/v1beta/decisions";
+    DEFAULT_DECISION_MODEL = "gemini-decision-1";
   }
 });
 
@@ -79,7 +79,7 @@ async function loadConfig(env = process.env) {
     config = parseConfigJson(await readFile(configPath(env), "utf8"));
   } catch {
   }
-  const envKey = env["TYPESAFE_API_KEY"];
+  const envKey = env["GEMINI_API_KEY"];
   if (envKey !== void 0 && envKey.trim() !== "") {
     config = { ...config, apiKey: envKey.trim() };
   }
@@ -105,7 +105,7 @@ var init_config = __esm({
     PLUGIN_DATA_KEYS = ["PLUGIN_DATA", "CLAUDE_PLUGIN_DATA"];
     DEFAULT_CONFIG = {
       apiKey: null,
-      model: DEFAULT_JEV_MODEL,
+      model: DEFAULT_DECISION_MODEL,
       baseUrl: null,
       keepThreshold: 0.5,
       preserveRecentItems: 8,
@@ -812,34 +812,38 @@ async function appendLog(dataDir, entry) {
 init_types();
 function buildJevRequest(params, state, questions) {
   return {
-    url: params.baseUrl ?? SYSTEM_ONE_URL,
+    url: params.baseUrl ?? GEMINI_DECISIONS_URL,
     method: "POST",
     headers: {
-      authorization: `Bearer ${params.apiKey}`,
+      "x-goog-api-key": params.apiKey,
       "content-type": "application/json"
     },
-    body: JSON.stringify({ model: params.model ?? DEFAULT_JEV_MODEL, state, questions })
+    body: JSON.stringify({
+      model: params.model ?? DEFAULT_DECISION_MODEL,
+      input: JSON.stringify(state),
+      questions
+    })
   };
 }
 function parseJevResponse(status, ok, text) {
-  if (!ok) throw new Error(`jev: HTTP ${status}`);
+  if (!ok) throw new Error(`gemini: HTTP ${status}`);
   let parsed;
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new Error("jev: response is not JSON");
+    throw new Error("gemini: response is not JSON");
   }
   const answers = parsed?.["answers"];
-  if (typeof answers !== "object" || answers === null) {
-    throw new Error("jev: response has no answers object");
+  if (typeof answers !== "object" || answers === null || Array.isArray(answers)) {
+    throw new Error("gemini: response has no answers object");
   }
   return { answers };
 }
 function noulAnswer(response, name) {
   const answer = response.answers[name];
-  if (answer === void 0) return void 0;
+  if (typeof answer !== "object" || answer === null) return void 0;
   const value = answer["noul"];
-  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1 ? value : void 0;
 }
 
 // src/jev/client.ts
@@ -856,11 +860,11 @@ var JevClient = class {
     this.options = options;
   }
   apiKey() {
-    const key = this.options.apiKey ?? process.env["TYPESAFE_API_KEY"];
+    const key = this.options.apiKey ?? process.env["GEMINI_API_KEY"];
     if (key === void 0 || key.trim() === "") {
-      throw new Error("TYPESAFE_API_KEY is not configured");
+      throw new Error("GEMINI_API_KEY is not configured");
     }
-    return key;
+    return key.trim();
   }
   async ask(state, questions) {
     const request = buildJevRequest(
@@ -872,7 +876,7 @@ var JevClient = class {
     const timeoutMs = this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const retries = this.options.retries ?? DEFAULT_RETRIES;
     const backoffMs = this.options.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS;
-    let lastError = new Error("jev: request never ran");
+    let lastError = new Error("gemini: request never ran");
     for (let attempt = 0; attempt <= retries; attempt += 1) {
       if (attempt > 0) await sleep(backoffMs);
       const controller = new AbortController();
@@ -898,33 +902,45 @@ var JevClient = class {
       }
       if (ok) return parseJevResponse(status, true, text);
       if (!isRetryable(status)) return parseJevResponse(status, false, text);
-      lastError = new Error(`jev: HTTP ${status}`);
+      lastError = new Error(`gemini: HTTP ${status}`);
     }
     throw lastError;
   }
 };
 
 // src/jev/questions.ts
+import { createHash } from "node:crypto";
 var PER_CALL_QUESTION_TOKENS = 48;
 var REQUEST_OVERHEAD_TOKENS = 64;
+function questionKeys(callId) {
+  const id = /^[A-Za-z0-9_-]{1,57}$/.test(callId) && !callId.startsWith("hash_") ? callId : `hash_${createHash("sha256").update(callId).digest("hex").slice(0, 48)}`;
+  return { call: `call_${id}`, result: `result_${id}` };
+}
 function questionsFor(call) {
+  const keys = questionKeys(call.callId);
   return {
-    [`call_${call.callId}`]: {
+    [keys.call]: {
       type: "noul",
       instructions: `Tool call ${call.name} (${call.callId}) should stay in the history: knowing this call was made, with its input ${call.argumentsJson.slice(0, 200)}, still matters for what comes next`,
-      criteria: { true: "still matters", false: "droppable together with its output" }
+      criteria: {
+        true_description: "still matters",
+        false_description: "droppable together with its output"
+      }
     },
-    [`result_${call.callId}`]: {
+    [keys.result]: {
       type: "noul",
       instructions: `The full output of the ${call.name} call (${call.callId}, ${call.outputChars} chars) should stay in the history verbatim: its contents are still needed and re-running the tool would not reproduce them`,
-      criteria: { true: "needed verbatim", false: "droppable, re-running can recover it" }
+      criteria: {
+        true_description: "needed verbatim",
+        false_description: "droppable, re-running can recover it"
+      }
     }
   };
 }
 function batchCalls(calls, stateTokenCount, maxRequestTokens) {
   if (calls.length === 0) return [];
   const budget = maxRequestTokens - stateTokenCount - REQUEST_OVERHEAD_TOKENS;
-  const perBatch = Math.max(1, Math.floor(budget / PER_CALL_QUESTION_TOKENS));
+  const perBatch = Math.min(500, Math.max(1, Math.floor(budget / PER_CALL_QUESTION_TOKENS)));
   const batches = [];
   for (let index = 0; index < calls.length; index += perBatch) {
     batches.push(calls.slice(index, index + perBatch));
@@ -1146,15 +1162,16 @@ async function scoreBatch(batch, state, asker, threshold) {
   try {
     const response = await asker.ask(state, questions);
     return batch.map((call) => {
-      const keepCall = noulAnswer(response, `call_${call.callId}`) ?? 1;
-      const keepResult = noulAnswer(response, `result_${call.callId}`) ?? 1;
+      const keys = questionKeys(call.callId);
+      const keepCall = noulAnswer(response, keys.call) ?? 1;
+      const keepResult = noulAnswer(response, keys.result) ?? 1;
       return {
         call,
         keepCall,
         keepResult,
         action: decideAction(keepCall, keepResult, threshold),
         pinned: false,
-        reason: noulAnswer(response, `call_${call.callId}`) === void 0 ? "unanswered" : "scored"
+        reason: noulAnswer(response, keys.call) === void 0 ? "unanswered" : "scored"
       };
     });
   } catch {
@@ -1196,7 +1213,7 @@ async function runPreCompact(input, config, env = process.env, asker) {
   if (transport === null) {
     return {
       continue: true,
-      note: "fast-jev: TYPESAFE_API_KEY not configured; letting built-in compaction proceed"
+      note: "fast-jev: GEMINI_API_KEY not configured; letting built-in compaction proceed"
     };
   }
   if (items.length === 0) {
@@ -1263,10 +1280,10 @@ async function runPreCompact(input, config, env = process.env, asker) {
 }
 
 // src/backfill.ts
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 var FINGERPRINT_HEAD = 200;
 function fingerprint(text) {
-  return createHash("sha256").update(text).digest("hex");
+  return createHash2("sha256").update(text).digest("hex");
 }
 function indexHistory(history) {
   const callIds = /* @__PURE__ */ new Set();
